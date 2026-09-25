@@ -2609,6 +2609,8 @@ namespace TH15 {
     //     g_th15_laser_hit_draw_vec.push_back({ posA, posB, posD, posC });
     // }
      EHOOK_DY(th15_update, 0x4015fa, 1, {
+        if (!GetMemContent(PLAYER_PTR))
+            g_th15mb.OnRunEnd();
         GameGuiBegin(IMPL_WIN32_DX9, !THAdvOptWnd::singleton().IsOpen());
 
         // Gui components update
@@ -2676,14 +2678,17 @@ namespace TH15 {
     {
         TH15InGameInfo::singleton().mBombCount = 0;
         TH15InGameInfo::singleton().mMissCount = 0;
+        g_th15mb.OnGameStart(thPracParam.mode == 1);
     })
     EHOOK_DY(th15_bomb_dec, 0x41497A,5, // bomb dec
     {
         TH15InGameInfo::singleton().mBombCount++;
+        g_th15mb.Record('b', *(int*)RVA(TH15_MB_STAGE_ADDR));
     })
     EHOOK_DY(th15_life_dec, 0x456398,5, // life dec
     {
        TH15InGameInfo::singleton().mMissCount++;
+       g_th15mb.Record('m', *(int*)RVA(TH15_MB_STAGE_ADDR));
        FastRetry(thPracParam.mode);
     })
     EHOOK_DY(th15_lock_timer1, 0x43404A,10, // initialize
@@ -2693,10 +2698,23 @@ namespace TH15 {
     EHOOK_DY(th15_lock_timer2, 0x42C738,4, // SetNextPattern case 514
     {
         g_lock_timer = 0;
+        g_th15mb.CacheBossPtr(pCtx->Edi);
+    })
+    EHOOK_DY(th15_pattern_switch, 0x42C7D6,5, // SetNextPattern normal 分支：缓存本次新写入名
+    {
+        g_th15mb.OnPatternSwitch(*(uintptr_t*)(pCtx->Esp + 8));
+    })
+    EHOOK_DY(th15_pattern_switch_bossdead, 0x42C785,5, // SetNextPattern BossDead 分支：同上
+    {
+        g_th15mb.OnPatternSwitch(*(uintptr_t*)(pCtx->Esp + 8));
     })
     EHOOK_DY(th15_lock_timer3, 0x42B938,2,// set boss mode case 512
     {
         g_lock_timer = 0;
+        g_th15mb.CacheBossPtr(pCtx->Edi);
+        if ((int)pCtx->Eax >= 0) {   // boss 进场
+            g_th15mb.OnBossEnter();
+        }
     })
     EHOOK_DY(th15_lock_timer4, 0x4301E8,6, // decrease time (update)
     {
