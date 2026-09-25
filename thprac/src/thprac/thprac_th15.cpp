@@ -1,6 +1,7 @@
 ﻿#include "thprac_games.h"
 #include "thprac_utils.h"
 #include "thprac_th15_abtest.h"
+#include "thprac_th15_missbomb.h"
 #include "thprac_igi_key_render.h"
 #include <format>
 #include <numbers>
