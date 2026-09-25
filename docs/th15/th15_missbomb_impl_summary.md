@@ -62,7 +62,15 @@
    - 记录路径上还使用 `std::string` / `std::format` / `std::deque` 在热 hook 中分配内存。
    - 另有一个与写盘无关的隐患：`g_boss_ptr` 仅在开局清空，换关/boss 消失后未清，之后被当野指针读取。
 
-## 5. 相关文档
+## 5. 重做约定与注意事项
+
+- **文件操作强制使用 Win32 API**：一律用 `CreateFileW` / `WriteFile` / `ReadFile`（配合 `CloseHandle`），**禁止**使用 C++ STL 文件流（`std::ofstream` / `std::ifstream`）。仓库内其它所有写盘（截图 `thprac_games_dx8.cpp`、replay `thprac_games.cpp`、游戏内日志 `thprac_log.cpp`）均如此，是已被验证的方式。
+- **游戏进程内避免堆分配**：记录路径（miss/bomb hook 内）不要使用会在运行时分配内存的 C++ 容器/字符串/格式化（如 `std::string` / `std::format` / `std::deque`）；记录数据用定长 `char[]`、定长数组等普通 C 结构。
+- **缓存指针必须及时清理**：缓存的游戏对象指针（如 `g_boss_ptr`）应在换关、boss 退场、一局结束时清空，或读取前先校验有效性，避免野指针读取导致的偶发崩溃。
+- **（可选）把落盘放到 launcher 进程**：若仍不希望在游戏进程内写盘，可用命名共享内存（`CreateFileMapping` / `MapViewOfFile`）把记录传给 launcher，由 launcher 用 Win32 写文件；这会引入一条跨进程通道，非必需，仅在确有需要时采用。
+- **记录范围**：仅在 thprac 练习模式（`mode == 1`）且对应开关开启时记录。
+
+## 6. 相关文档
 
 | 文档 | 说明 |
 | --- | --- |
