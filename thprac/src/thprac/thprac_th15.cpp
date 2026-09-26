@@ -716,6 +716,11 @@ namespace TH15 {
                 ImGui::NextColumn();
                 ImGui::Text(S(THPRAC_INGAMEINFO_BOMB_COUNT));ImGui::NextColumn();ImGui::Text("%8d",mBombCount);
                 ImGui::NextColumn();
+                {
+                    const char* lastEvent = g_th15mb.GetLastEvent();
+                    ImGui::Text("Last m/b");ImGui::NextColumn();ImGui::Text("%8s", lastEvent ? lastEvent : "-");
+                    ImGui::NextColumn();
+                }
                 if (g_adv_igi_options.th15_showShootingDownRate) {
                     int32_t cur_killed = *(int32_t*)(0x004E7488);
                     int32_t tot_enm = *(int32_t*)(0x004E7484);
@@ -2609,7 +2614,9 @@ namespace TH15 {
     //     g_th15_laser_hit_draw_vec.push_back({ posA, posB, posD, posC });
     // }
      EHOOK_DY(th15_update, 0x4015fa, 1, {
-        if (!GetMemContent(PLAYER_PTR))
+        if (GetMemContent(PLAYER_PTR))
+            g_th15mb.MarkRunActive();
+        else
             g_th15mb.OnRunEnd();
         GameGuiBegin(IMPL_WIN32_DX9, !THAdvOptWnd::singleton().IsOpen());
 
@@ -2719,6 +2726,18 @@ namespace TH15 {
     EHOOK_DY(th15_lock_timer4, 0x4301E8,6, // decrease time (update)
     {
         g_lock_timer_flag = true;
+    })
+    EHOOK_DY(th15_ecl_host_capture, 0x43BBC8, 2, // spawn "main" 宿主后：EAX = 宿主对象
+    {
+        g_th15mb.OnEclHostCaptured(pCtx->Eax);
+    })
+    EHOOK_DY(th15_ecl_host_capture2, 0x43D48E, 5, // 另一个 spawn "main" 站点（关卡进入）：EAX = 宿主对象
+    {
+        g_th15mb.OnEclHostCaptured(pCtx->Eax);
+    })
+    EHOOK_DY(th15_ecl_host_capture3, 0x43D6BE, 5, // 另一个 spawn "main" 站点（重开/重试）：EAX = 宿主对象
+    {
+        g_th15mb.OnEclHostCaptured(pCtx->Eax);
     })
     HOOKSET_ENDDEF()
     static __declspec(noinline) void THGuiCreate()

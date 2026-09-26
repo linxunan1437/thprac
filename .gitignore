@@ -263,3 +263,15 @@ paket-files/
 # Python Tools for Visual Studio (PTVS)
 __pycache__/
 *.pyc
+
+# ===== Game binaries & reverse-engineering artifacts (do not redistribute) =====
+# Game executables (th14 / th15)
+docs/th14/*.exe
+docs/th15/*.exe
+# Decompiled executable (e.g. Ghidra th15.exe.c) and ECL decompilation (.decl)
+*.exe.c
+*.decl
+# ECL scripts / decompiled ECL
+*.ecl
+docs/th14/ECL/
+docs/th15/ECL/
