@@ -4,6 +4,7 @@
 #include "thprac_launcher_main.h"
 #include "thprac_launcher_cfg.h"
 #include "thprac_launcher_games_def.h"
+#include "thprac_load_exe.h"
 #include "thprac_main.h"
 #include "thprac_gui_locale.h"
 #include "thprac_utils.h"
@@ -59,7 +60,96 @@ bool CheckIfAnyGame2() // = THPrac_main.cpp: CheckIfAnyGame()
     return false;
 }
 
+#pragma region GameSessionRecorder
+// 按局计时：门控表与判据出处见 docs/gametime/gametime_thxx_flags.md。
 
+static bool ReadFlagValue(HANDLE hProc, uintptr_t base, const THGameTimeFlag& flag, uint32_t& out)
+{
+    if (!flag.rva || (flag.bytes != 1 && flag.bytes != 2 && flag.bytes != 4))
+        return false;
+    uint32_t value = 0;
+    SIZE_T bytesRead = 0;
+    if (!ReadProcessMemory(hProc, (void*)(base + flag.rva), &value, flag.bytes, &bytesRead) || bytesRead != flag.bytes)
+        return false;
+    out = value;
+    return true;
+}
+
+static bool EvalRaw(const THGameTimeFlag& flag, uint32_t value)
+{
+    switch (flag.cmp) {
+    case GateCmp::Eq:
+        return value == flag.value;
+    case GateCmp::Ne:
+        return value != flag.value;
+    case GateCmp::BitClear:
+        return (value & flag.value) == 0;
+    }
+    return false;
+}
+
+static bool EvalFlag(HANDLE hProc, uintptr_t base, const THGameTimeFlag& flag)
+{
+    uint32_t value = 0;
+    if (!ReadFlagValue(hProc, base, flag, value))
+        return false;
+    return EvalRaw(flag, value);
+}
+
+// 短路顺序固定 gamemode → pause → replay：停在菜单里每 tick 只花 1 次 ReadProcessMemory。
+// 任一读失败即本 tick 不计时（保守，避免游戏崩溃瞬间刷时间）。
+static bool SampleGate(HANDLE hProc, uintptr_t base, const THGameTimeGate* gate)
+{
+    if (!gate)
+        return false;
+    return EvalFlag(hProc, base, gate->gamemode)
+        && EvalFlag(hProc, base, gate->pause)
+        && EvalFlag(hProc, base, gate->replay);
+}
+
+// exe 名快筛：逻辑与 thprac_launcher_games.cpp 的 CheckProcessOmni 一致（那函数是 static，复用不了）。
+static bool ExeNameLooksLikeTouhou(const wchar_t* name)
+{
+    if (!wcscmp(L"東方紅魔郷.exe", name) || !wcscmp(L"alcostg.exe", name) || !wcscmp(L"搶曽峠杺嫿.exe", name))
+        return true;
+    if (name[0] != L't' || name[1] != L'h')
+        return false;
+    return name[2] >= L'0' && name[2] <= L'9' && name[3] >= L'0' && name[3] <= L'9';
+}
+
+// 一局一行追加到 <数据目录>gametime_sessions.jsonl。会话进行中不写盘，天然低频。
+static void AppendGameSessionLine(const char* gameId, const SYSTEMTIME& startTime, const SYSTEMTIME& endTime, int64_t playNs)
+{
+    auto dir = LauncherGetDataDir();
+    if (dir.empty())
+        return;
+
+    char line[256];
+    int len = _snprintf_s(line, _TRUNCATE,
+        "{\"game\":\"%s\",\"start\":\"%04u-%02u-%02u %02u:%02u:%02u\","
+        "\"end\":\"%04u-%02u-%02u %02u:%02u:%02u\",\"durationNs\":%lld}",
+        gameId,
+        (unsigned)startTime.wYear, (unsigned)startTime.wMonth, (unsigned)startTime.wDay,
+        (unsigned)startTime.wHour, (unsigned)startTime.wMinute, (unsigned)startTime.wSecond,
+        (unsigned)endTime.wYear, (unsigned)endTime.wMonth, (unsigned)endTime.wDay,
+        (unsigned)endTime.wHour, (unsigned)endTime.wMinute, (unsigned)endTime.wSecond,
+        (long long)playNs);
+    if (len <= 0)
+        return;
+
+    auto path = dir + L"gametime_sessions.jsonl";
+    auto hFile = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
+        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+        return;
+
+    SetFilePointer(hFile, 0, nullptr, FILE_END);
+    DWORD written = 0;
+    WriteFile(hFile, line, (DWORD)len, &written, nullptr);
+    WriteFile(hFile, "\r\n", 2, &written, nullptr);
+    CloseHandle(hFile);
+}
+#pragma endregion
 
 class THDrawLuck {
     THDrawLuck() { memset(name, 0, sizeof(name)); }
@@ -364,8 +454,94 @@ private:
     bool mEnableRecordGameTime = false;
     std::thread mUpdateThread;
 
+    // 按局计时（与上面的"进程存活即计时"累加器完全独立，互不影响）
+    HANDLE mSessionProc = nullptr;      // 游戏进程句柄，含 SYNCHRONIZE
+    THGameSig* mSessionSig = nullptr;   // 当前绑定作品（指向 gGameDefs 静态条目）
+    uintptr_t mSessionBase = 0;
+    DWORD mSessionPid = 0;
+    SYSTEMTIME mSessionStart {};
+    int64_t mSessionPlayNs = 0;
+    bool mBindTried = false;            // 每个"有游戏"周期只枚举一次，避免非计时作品被反复扫描
+
 private:
-public: 
+    // 只在"探针说有游戏 且 尚未绑定"时枚举一次，稳态零成本。
+    // 绑定是一次性的：认不出来就整局不记（宁可不记录，也不要一条起点错误的记录）。
+    void TryBindSession()
+    {
+        auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE)
+            return;
+
+        PROCESSENTRY32W entry {};
+        entry.dwSize = sizeof(entry);
+        if (Process32FirstW(snapshot, &entry)) {
+            do {
+                if (!ExeNameLooksLikeTouhou(entry.szExeFile))
+                    continue;
+                if (BindProcess(entry.th32ProcessID))
+                    break;
+            } while (Process32NextW(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+    }
+    // OpenProcess → 取基址 → PE 指纹比对 gGameDefs。只认挂了 gametimeGate 的条目，
+    // 于是"该作是否参与按局计时"和"是否记录"是同一件事。
+    bool BindProcess(DWORD pid)
+    {
+        auto hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
+        if (!hProc)
+            return false;
+
+        auto base = GetGameModuleBase(hProc);
+        if (!base) {
+            CloseHandle(hProc);
+            return false;
+        }
+
+        ExeSig sig {};
+        if (GetExeInfoEx((uintptr_t)hProc, base, sig)) {
+            for (auto& gameDef : gGameDefs) {
+                if (!gameDef.gametimeGate)
+                    continue;
+                if (gameDef.exeSig.textSize != sig.textSize || gameDef.exeSig.timeStamp != sig.timeStamp)
+                    continue;
+
+                mSessionProc = hProc;
+                mSessionSig = &gameDef;
+                mSessionBase = base;
+                mSessionPid = pid;
+                mSessionPlayNs = 0;
+                GetLocalTime(&mSessionStart);
+                return true;
+            }
+        }
+
+        CloseHandle(hProc);
+        return false;
+    }
+    // 进程已退出 / launcher 被关：收尾并把本局落盘。
+    void CloseSession()
+    {
+        if (!mSessionProc)
+            return;
+
+        SYSTEMTIME endTime {};
+        GetLocalTime(&endTime);
+        auto playNs = mSessionPlayNs;
+        auto gameId = mSessionSig->idStr;
+
+        CloseHandle(mSessionProc);
+        mSessionProc = nullptr;
+        mSessionSig = nullptr;
+        mSessionBase = 0;
+        mSessionPid = 0;
+        mSessionPlayNs = 0;
+
+        if (playNs > 0)
+            AppendGameSessionLine(gameId, mSessionStart, endTime, playNs);
+    }
+
+public:
     static void UpdateGameTime(){
         THGameTimeRecorder& thiz = THGameTimeRecorder::singleton();
         while (thiz.mUpdateGameTime) {
@@ -374,6 +550,14 @@ public:
             if (thiz.mGameTimeTestGameOpen_ns > 1000000000) { // test every second
                 is_game_open = CheckIfAnyGame2();
                 thiz.mGameTimeTestGameOpen_ns = 0;
+                if (is_game_open) {
+                    if (!thiz.mSessionProc && !thiz.mBindTried) {
+                        thiz.mBindTried = true;
+                        thiz.TryBindSession();
+                    }
+                } else {
+                    thiz.mBindTried = false;
+                }
             }
             double passed_time = ResetClock(thiz.clock_id)*1e9;
 
@@ -381,9 +565,17 @@ public:
                 thiz.mGameTime_ns += static_cast<int64_t>(passed_time);
                 thiz.mGameTimeCur_ns += static_cast<int64_t>(passed_time);
             }
+            if (thiz.mSessionProc) {
+                if (WaitForSingleObject(thiz.mSessionProc, 0) == WAIT_OBJECT_0) {
+                    thiz.CloseSession(); // 正常退出 / 强杀 / 崩溃，进程对象必然 signal
+                } else if (SampleGate(thiz.mSessionProc, thiz.mSessionBase, thiz.mSessionSig->gametimeGate)) {
+                    thiz.mSessionPlayNs += static_cast<int64_t>(passed_time);
+                }
+            }
             thiz.mGameTimeTestGameOpen_ns += static_cast<int64_t>(passed_time);
             thiz.mGameTimeTooLongSE_ns += static_cast<int64_t>(passed_time);
         }
+        thiz.CloseSession(); // launcher 先被关：仍写一行，end = 关闭时刻
         LauncherSetGameTime(thiz.mGameTime_ns);
     }
     bool IsEnabled()
@@ -460,6 +652,28 @@ public:
             }
             ImGui::NewLine();
             ImGui::Separator();
+
+            // 按局计时调试读数（打样期验证门控 RVA 用；只用既有 locale 词条，不新增文案）
+            auto* sessSig = mSessionSig;
+            auto sessProc = mSessionProc;
+            auto sessBase = mSessionBase;
+            ImGui::Text("session: %s", sessSig ? sessSig->idStr : "-");
+            if (sessSig && sessProc) {
+                ImGui::Text("pid %u  base 0x%08X  play %.3fs", (unsigned)mSessionPid, (unsigned)sessBase, mSessionPlayNs / 1e9);
+                const auto* gate = sessSig->gametimeGate;
+                const THGameTimeFlag* flags[3] = { &gate->gamemode, &gate->pause, &gate->replay };
+                const char* flagNames[3] = { "gamemode", "pause", "replay" };
+                bool evaluated = true;
+                for (int i = 0; i < 3 && evaluated; i++) {
+                    uint32_t v = 0;
+                    if (!ReadFlagValue(sessProc, sessBase, *flags[i], v)) {
+                        ImGui::Text("%s: read failed (rva 0x%X)", flagNames[i], (unsigned)flags[i]->rva);
+                        break;
+                    }
+                    evaluated = EvalRaw(*flags[i], v);
+                    ImGui::Text("%s: 0x%X -> %s", flagNames[i], (unsigned)v, evaluated ? "ok" : "blocked");
+                }
+            }
 
             if (mGameTimeCur_ns >= 1000000000ll * 3600 * (double)mTooLongGamePlay_hour) {
                 auto y_orig=ImGui::GetCursorPosY();

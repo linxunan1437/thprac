@@ -32,6 +32,20 @@ struct ExeSig {
     uint32_t steamMetroHash[4];
 };
 
+// 按局计时门控：读游戏进程内一个内存位置并判定。三位合取 = "正在有效游玩"。
+enum class GateCmp : uint8_t { Eq, Ne, BitClear };
+struct THGameTimeFlag {
+    uint32_t rva;   // 模块内偏移（地址 = base + rva）
+    uint8_t bytes;  // 1 / 2 / 4
+    uint32_t value;
+    GateCmp cmp = GateCmp::Eq;
+};
+struct THGameTimeGate {
+    THGameTimeFlag gamemode; // 关卡进行中
+    THGameTimeFlag pause;    // 未暂停
+    THGameTimeFlag replay;   // 非回放
+};
+
 struct THGameSig {
     const char* idStr;
     const wchar_t* steamId;
@@ -46,6 +60,7 @@ struct THGameSig {
 
     void (*initFunc)();
     ExeSig exeSig;
+    const THGameTimeGate* gametimeGate = nullptr; // 非空 = 该作参与按局计时
 };
 
 struct THKnownGame {
@@ -350,6 +365,29 @@ static THKnownGame gKnownGames[] {
       
 };
 
+// 按局计时门控表（RVA = 绝对 VA − 0x400000；A/B/C 代不重定位）。
+// 判据出处与三态验证记录见 docs/gametime/gametime_thxx_flags.md。
+static const THGameTimeGate gGateTh06 {
+    { 0x2C6EA4, 4, 2 },                      // 0x6C6EA4 gameState == 2
+    { 0x29D4BF, 1, 0 },                      // 0x69D4BF pauseMenuState == 0
+    { 0x29BCBC, 1, 0 },                      // 0x69BCBC is_rep == 0
+};
+static const THGameTimeGate gGateTh07 {
+    { 0x175AA4, 4, 2 },                      // Supervisor(0x575950)+0x154 gamemode == 2
+    { 0x22F64C, 1, 0 },                      // GameManager(0x626270)+0x93DC：0=未开 1=刚开 2=打开中，故必须 == 0
+    { 0x22F648, 4, 0x8, GateCmp::BitClear }, // GameManager+0x93D8 bit3 = replay
+};
+static const THGameTimeGate gGateTh08 {
+    { 0x13CE8B0, 4, 2 },                     // Supervisor(0x17CE758)+0x158 gamemode == 2
+    { 0x124D0BA, 1, 0 },                     // GameManager(0x160F508)+0x3DBB2：0/1/2，故必须 == 0
+    { 0x124D0B4, 4, 0x8, GateCmp::BitClear },// GM+0x3DBAC bit3 = replay（该 dword 标题画面基线非 0，只能位测试）
+};
+static const THGameTimeGate gGateTh15 {
+    { 0x0E9BB8, 4, 0, GateCmp::Ne },         // PLAYER_PTR != 0
+    { 0x0E9B24, 4, 0x10, GateCmp::BitClear },// StageController+0x90 bit0x10 = 冻结（Esc / GameOver / Continue）
+    { 0x0E7ECC, 4, 0xd, GateCmp::Ne },       // 场景场状态 != 0xd（0xd = 回放/演示播放中）
+};
+
 static THGameSig gGameDefs[] {
     { "alcostg",
         nullptr,
@@ -378,7 +416,7 @@ static THGameSig gGameDefs[] {
             { 0x212b, 0xe22a, 0x05bc, 0xac44, 0x4867,
                 0x4646, 0xd3f8, 0x4848, 0xc249, 0xa28d },
             { 0xbae18847, 0x78d78ce2,
-                0x4d19703a, 0x3f5cbe16 } } },
+                0x4d19703a, 0x3f5cbe16 } }, &gGateTh06 },
     { "th07",
         nullptr,
         TH07_TITLE,
@@ -392,7 +430,7 @@ static THGameSig gGameDefs[] {
             { 0x212b, 0xe22a, 0x0a45, 0xac44, 0x5ede,
                 0x4646, 0xd3f8, 0x4848, 0xc249, 0xa28d },
             { 0xd69a5df6, 0x4a78f383,
-                0x956d7f9f, 0x02e3ad3b } } },
+                0x956d7f9f, 0x02e3ad3b } }, &gGateTh07 },
     { "th075",
         nullptr,
         TH075_TITLE,
@@ -420,7 +458,7 @@ static THGameSig gGameDefs[] {
             { 0x212b, 0xf22a, 0x089b, 0xac44, 0x498b,
                 0x4646, 0xd3f8, 0x4848, 0xc249, 0xa28d },
             { 0xc1f84aea, 0xfad04d3b,
-                0xf28642e5, 0x7fe28f3b } } },
+                0xf28642e5, 0x7fe28f3b } }, &gGateTh08 },
     { "th09",
         L"1420810",
         TH09_TITLE,
@@ -652,7 +690,7 @@ static THGameSig gGameDefs[] {
             { 0xed3ac6ec, 0x21bc473c,
                 0x186edbb4, 0x9ebd98cf },
             { 0x75871bd4, 0x0adeb360,
-                0xf429659d, 0x931922e2 } } },
+                0xf429659d, 0x931922e2 } }, &gGateTh15 },
     { "th155",
         L"716710",
         TH155_TITLE,
