@@ -149,6 +149,91 @@ static void AppendGameSessionLine(const char* gameId, const SYSTEMTIME& startTim
     WriteFile(hFile, "\r\n", 2, &written, nullptr);
     CloseHandle(hFile);
 }
+
+// ---- 读回：统计详情页的输入 ----
+struct GameSessionEntry {
+    uint16_t year, month, day;
+    int64_t durationNs;
+    char game[16]; // 与 gGameDefs 的 idStr 对齐
+};
+
+// 逐行解析上面那个写盘格式。game/start 按既定字段顺序取，durationNs 用查找定位
+// （plan §1.6 预告 P2 会加 gate / closed，按顺序读会被加字段打断）。
+static bool ParseGameSessionLine(const char* line, GameSessionEntry& entry)
+{
+    char game[16] = {};
+    unsigned year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    if (sscanf_s(line, "{\"game\":\"%15[^\"]\",\"start\":\"%u-%u-%u %u:%u:%u\"",
+            game, (unsigned)sizeof(game),
+            &year, &month, &day, &hour, &minute, &second) != 7)
+        return false;
+
+    auto durKey = strstr(line, "\"durationNs\":");
+    if (!durKey)
+        return false;
+
+    entry.year = (uint16_t)year;
+    entry.month = (uint16_t)month;
+    entry.day = (uint16_t)day;
+    entry.durationNs = _strtoi64(durKey + 13, nullptr, 10);
+    memcpy(entry.game, game, sizeof(entry.game));
+    return true;
+}
+
+// 读不到文件（还没玩过 / 被删 / 数据目录拿不到）= 空列表，不是错误。
+static void LoadGameSessionEntries(std::vector<GameSessionEntry>& entries)
+{
+    entries.clear();
+
+    auto dir = LauncherGetDataDir();
+    if (dir.empty())
+        return;
+
+    void* buffer = nullptr;
+    size_t size = 0;
+    auto path = dir + L"gametime_sessions.jsonl";
+    if (!LoadJsonFile(path, buffer, size))
+        return;
+
+    const char* cur = (const char*)buffer;
+    const char* end = cur + size;
+    while (cur < end) {
+        auto nl = (const char*)memchr(cur, '\n', (size_t)(end - cur));
+        auto lineEnd = nl ? nl : end;
+        size_t len = (size_t)(lineEnd - cur);
+        while (len && (cur[len - 1] == '\r' || cur[len - 1] == ' '))
+            len--;
+
+        char line[256];
+        if (len && len < sizeof(line)) {
+            memcpy(line, cur, len);
+            line[len] = 0;
+            GameSessionEntry entry {};
+            if (ParseGameSessionLine(line, entry))
+                entries.push_back(entry);
+        }
+
+        cur = nl ? nl + 1 : end;
+    }
+    free(buffer);
+}
+
+// idStr -> 人类可读标题（gGameDefs 的 refStr）；认不出来就退回 idStr 本身。
+static const char* GameSessionGameName(const char* idStr)
+{
+    for (auto& gameDef : gGameDefs) {
+        if (!strcmp(gameDef.idStr, idStr))
+            return S(gameDef.refStr);
+    }
+    return idStr;
+}
+
+// 只到秒："H:MM:SS"。比 GetTime_HHMMSS 的 ms/us/ns 三段更适合表格。
+static std::string FormatGameTimeShort(int64_t ns)
+{
+    int64_t seconds = ns / 1000000000ll;
+    return std::format("{}:{:0>2}:{:0>2}", seconds / 3600, (seconds / 60) % 60, seconds % 60);
+}
 #pragma endregion
 
 class THDrawLuck {
@@ -611,7 +696,7 @@ public:
         }
     }
     
-    void Gui()
+    bool Gui()
     {
         if (mEnableRecordGameTime) {
             ImGui::Text(S(THPRAC_GAME_TIME_TOTAL));
@@ -650,6 +735,8 @@ public:
             {
                 mGameTimeCur_ns = 0;
             }
+            ImGui::SameLine();
+            bool showDetail = ImGui::Button(S(THPRAC_GAME_TIME_DETAIL));
             ImGui::NewLine();
             ImGui::Separator();
 
@@ -699,8 +786,10 @@ public:
                 ImScaleEnd(2.3f + sinf(angle) * 0.8f, 2.3f + cosf(angle) * 0.8f);
                 ImGui::SetCursorPosY(y_orig);
             }
+            return showDetail;
         } else {
             ImGui::Text(S(THPRAC_ENABLE_GAMETIME_RECORD));
+            return false;
         }
     }
 };
@@ -709,20 +798,126 @@ class THOthersGui {
 private:
     THOthersGui()
     {
-
+        mGuiUpdFunc = [&]() { GuiMain(); };
     }
     SINGLETON(THOthersGui)
 
 public:
     void GuiUpdate(){
-        GuiMain();
+        mGuiUpdFunc();
     }
 
 private:
     void GuiMain(){
         THDrawLuck::singleton().Gui();
-        THGameTimeRecorder::singleton().Gui();
+        if (THGameTimeRecorder::singleton().Gui()) {
+            // 进详情页：读一次盘 + 复位筛选（默认本月 / 全部游戏）
+            LoadGameSessionEntries(mSessionEntries);
+            mSessionGameIds.clear();
+            for (auto& gameDef : gGameDefs) { // 按 gGameDefs 顺序建列表，选项次序稳定
+                for (auto& entry : mSessionEntries) {
+                    if (!strcmp(entry.game, gameDef.idStr)) {
+                        mSessionGameIds.emplace_back(gameDef.idStr);
+                        break;
+                    }
+                }
+            }
+            mSessionGameFilter = -1;
+            SYSTEMTIME now {};
+            GetLocalTime(&now);
+            mSessionYear = now.wYear;
+            mSessionMonth = now.wMonth;
+            mSessionLastMonth = now.wMonth; // 时间范围下拉只到"本年度至今"
+            mGuiUpdFunc = [&]() { GuiGameTimeDetail(); };
+        }
     }
+
+    void GuiGameTimeDetail(){
+        if (ImGui::Button(S(THPRAC_BACK))) {
+            mGuiUpdFunc = [&]() { GuiMain(); };
+            return;
+        }
+        ImGui::SameLine();
+        GuiCenteredText(S(THPRAC_GAME_TIME_DETAIL));
+        ImGui::Separator();
+
+        // 两个筛选下拉：BeginCombo 的预览就是当前选中值，不需要可见 label
+        const char* gamePreview = (mSessionGameFilter < 0)
+            ? S(THPRAC_GAME_TIME_ALL)
+            : GameSessionGameName(mSessionGameIds[mSessionGameFilter].c_str());
+        if (ImGui::BeginCombo("##gametime_game", gamePreview)) {
+            if (ImGui::Selectable(S(THPRAC_GAME_TIME_ALL), mSessionGameFilter < 0))
+                mSessionGameFilter = -1;
+            if (mSessionGameFilter < 0)
+                ImGui::SetItemDefaultFocus();
+            for (size_t i = 0; i < mSessionGameIds.size(); i++) {
+                bool selected = (mSessionGameFilter == (int)i);
+                if (ImGui::Selectable(GameSessionGameName(mSessionGameIds[i].c_str()), selected))
+                    mSessionGameFilter = (int)i;
+                if (selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        // 时间范围：本年 1 月..当月，纯数字标签（免文案）
+        char monthPreview[16];
+        sprintf_s(monthPreview, "%04d-%02d", mSessionYear, mSessionMonth);
+        if (ImGui::BeginCombo("##gametime_month", monthPreview)) {
+            for (int month = 1; month <= mSessionLastMonth; month++) {
+                char label[16];
+                sprintf_s(label, "%04d-%02d", mSessionYear, month);
+                bool selected = (month == mSessionMonth);
+                if (ImGui::Selectable(label, selected))
+                    mSessionMonth = month;
+                if (selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        int64_t dayTotal[32] = {};
+        int64_t total = 0;
+        for (auto& entry : mSessionEntries) {
+            if (entry.year != mSessionYear || entry.month != mSessionMonth || entry.day < 1 || entry.day > 31)
+                continue;
+            if (mSessionGameFilter >= 0 && strcmp(entry.game, mSessionGameIds[mSessionGameFilter].c_str()))
+                continue;
+            dayTotal[entry.day] += entry.durationNs;
+            total += entry.durationNs;
+        }
+
+        ImGui::NewLine();
+        if (ImGui::BeginTable("##gametime_days", 2,
+                ImGuiTableFlags_::ImGuiTableFlags_Borders | ImGuiTableFlags_::ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn(S(THPRAC_GAME_TIME_DATE));
+            ImGui::TableSetupColumn(S(THPRAC_GAME_TIME_DURATION));
+            ImGui::TableHeadersRow();
+            for (int day = 1; day <= 31; day++) {
+                if (!dayTotal[day])
+                    continue; // 只列有记录的天
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text("%04d-%02d-%02d", mSessionYear, mSessionMonth, day);
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(FormatGameTimeShort(dayTotal[day]).c_str());
+            }
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(S(THPRAC_GAME_TIME_SUM));
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(FormatGameTimeShort(total).c_str());
+            ImGui::EndTable();
+        }
+    }
+
+    std::function<void(void)> mGuiUpdFunc = []() {};
+    std::vector<GameSessionEntry> mSessionEntries;
+    std::vector<std::string> mSessionGameIds; // 数据里出现过的游戏
+    int mSessionGameFilter = -1;              // -1 = 全部，否则索引进 mSessionGameIds
+    int mSessionYear = 0;
+    int mSessionMonth = 0;
+    int mSessionLastMonth = 0;
 };
 bool THPrac::LauncherOthersGuiUpd()
 {

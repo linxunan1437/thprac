@@ -7,7 +7,7 @@
 
 namespace THPrac {
 
-const char* th_glossary_str[3][1871] {
+const char* th_glossary_str[3][1876] {
     {
         "",
         "啤酒",
@@ -1880,6 +1880,11 @@ const char* th_glossary_str[3][1871] {
         "未知",
         "最大得点",
         "传送",
+        "全部",
+        "日期",
+        "查看时长详情",
+        "时长",
+        "合计",
     },
     {
         "",
@@ -3753,6 +3758,11 @@ const char* th_glossary_str[3][1871] {
         "Unknown",
         "Value",
         "Warp",
+        "All",
+        "Date",
+        "session details",
+        "Duration",
+        "Total",
     },
     {
         "",
@@ -5626,6 +5636,11 @@ const char* th_glossary_str[3][1871] {
         "不明",
         "最大得点",
         "ワープ",
+        "すべて",
+        "日付",
+        "セッション詳細",
+        "時間",
+        "合計",
     },
 };
 

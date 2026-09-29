@@ -376,6 +376,38 @@ bool       mBindTried = false;       // 每个"有游戏"周期只枚举一次
 - **(a2) 改成进 GUI / 最小化到托盘**：`main.cpp:224` 不 `return 0` 而继续 `GuiLauncherMain()`（`LauncherWndMinimize` 已存在，`thprac_launcher_main.cpp:239`）。UX 回归风险中高，不推荐。
 - **(b) 游戏侧心跳 + launcher 下次启动补全**：**不推荐**。游戏侧没有定时线程且退出无清理 → 心跳文件在游戏退出后必然残留，launcher **无法区分"这份心跳属于已退出的游戏"还是"游戏此刻仍在运行"**，可能造出**虚假记录**（比少一条记录糟糕得多）；而一旦引入进程存活校验来消歧，就已经在做主方案了。
 
+## 1.9 统计详情页（P3，已实现）
+
+**入口**：Others 页 `THGameTimeRecorder::Gui()` 里「重置时间」右侧的「查看时长详情」按钮 → `THOthersGui` 的二级页
+`GuiGameTimeDetail()`（仓库标准的 `mGuiUpdFunc` 换页手法，见 `thprac_launcher_games.cpp:2469`）。
+
+**数据流**：进页时 `LoadGameSessionEntries()` 读一次 `<数据目录>gametime_sessions.jsonl`，之后纯内存聚合；
+会话只在退出时落盘，所以不做定时刷新。
+
+**筛选**：
+
+| 维度 | 取值 | 默认 |
+| --- | --- | --- |
+| 游戏 | `全部` + 数据里出现过的作品（按 `gGameDefs` 顺序建列表，标题取 `S(sig->refStr)`） | 全部 |
+| 时间范围 | 本年度 1 月..当月（标签 `%04d-%02d`，纯数字免文案） | 当月 |
+
+**展示**：选中月份内逐日累加 `durationNs`，只列有记录的天，末行「合计」；两者都用本地 `FormatGameTimeShort()`（`H:MM:SS`）。
+日均/总计在「全部」筛选下就是各游戏之和。当月无记录时不加空状态文案，只有合计行 `0:00:00`。
+
+**解析**：格式是我们自己写的定长格式，**不引入 JSON 库**（与 §1.6 落盘侧对称）——`sscanf_s` 取
+`game`/`start`，`durationNs` 用 `strstr` 定位，因此 §1.6 预告的 P2 加字段不会打断解析。
+
+**新文案**：`THPRAC_GAME_TIME_DETAIL` / `_DATE` / `_DURATION` / `_ALL` / `_SUM` 五个词条。
+`thprac_locale_def.h/.cpp` 是 devtools 生成的，本次**手工同步**：枚举末尾追加（不动既有下标）+ 三个语言块末尾各补 5 条 +
+`th_glossary_str[3][1871]` → `[3][1876]`。核对手段（**必须做**，漏补一个块编译器不报错、只会得到空指针）：
+
+```
+grep -c '^        "' thprac/src/thprac/thprac_locale_def.cpp   # 期望 3 × 1876 = 5628
+```
+
+**已知边界**：① 记录开关关掉时按钮随 `if (mEnableRecordGameTime)` 一起消失，历史数据也就进不去；
+② 时间范围只有本年度，跨年数据不可达；③ 正在游玩的那一局尚未落盘，页面上看不到。
+
 ---
 
 # 二、逆向工程方案
@@ -480,7 +512,7 @@ bool       mBindTried = false;       // 每个"有游戏"周期只枚举一次
 | P1a | th07 / th08 反编译取 pause / replay（在 `D:\workshop\reasm`） | th07 / th08 报告 | **已完成**（已定案并三态验证） |
 | P1b | th07 / th08 三态探针验证（地址已验证，需验接入后的端到端行为） | 四作打样完成 | 待做 |
 | P2 | 分批推其余作品（分代 + 同构搬运）；同时补 `gate` / `closed` 字段与崩溃兜底 | 各作 gate + 标志位总表补齐 | 未开始 |
-| P3 | 统计侧（读 `gametime_sessions.jsonl` 做汇总的面板 / 工具） | 视需求 | 未开始 |
+| P3 | 统计侧（读 `gametime_sessions.jsonl` 做汇总的面板 / 工具） | Others 页「查看时长详情」二级页：按作品 + 月份筛选、逐日汇总（见 §1.9） | **已完成**（真机待验） |
 
 ## 3.3 风险与开放问题
 
@@ -527,6 +559,7 @@ bool       mBindTried = false;       // 每个"有游戏"周期只枚举一次
 | 2026-09-29 | 建档：初版方案（8 个改动点、新建 `THGameSessionRecorder`、启动瞬间拿句柄 + 枚举兜底、移植 `json_util`）。 |
 | 2026-09-29 | **极简版落地（P0）**。复核确认初版的 8 处里只有 1 处是功能数据本身（gate 表），其余 7 处都在解决"拿不到 `ReadProcessMemory` 的入参"。按"统一走枚举 + 就地扩展 `THGameTimeRecorder`"重做，**改动收敛到 2 个文件、零新增文件**（§1.7 的对照表列出被砍的 6 处及依据）。同时：th07 / th08 的 pause / replay 已定案并三态验证，`gGateTh07` / `gGateTh08` 填上真值，P1a 结项。实现后 `Release\|x86` 整包构建通过。 |
 | 2026-09-29 | **回退一处越界改动**：P0 初版顺手把探测节拍从 1 s 收到 100 ms，属于修改既有行为去换取 `start` 字段的精度——而 `start` 只是墙钟元数据，`playNs` 并不受影响（要等门控通过才开始累加）。**已改回原有的 `> 1000000000` / `// test every second`**。既有代码的节拍不为本功能服务。 |
+| 2026-09-29 | **P3 详情页落地**（§1.9）。Others 页新增「查看时长详情」二级页：作品 + 月份筛选、逐日汇总、合计行。改动集中在 `thprac_launcher_others.cpp`（解析 4 个 static + `THOthersGui` 换页）；`THGameTimeRecorder::Gui()` 由 `void` 改 `bool`（唯一调用点）；`thprac_launcher_games.h` 补 1 行 `LoadJsonFile` 声明以复用既有读文件；手工同步 5 个 locale 词条到生成文件。记录/门控/落盘路径**一行未动**。 |
 
 ### 实现与初版方案的差异（一句话版）
 

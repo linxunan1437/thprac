@@ -961,6 +961,11 @@
       "THPRAC_GAME_TIME_RESET": [ "重置时间", "reset", "reset" ],
       "THPRAC_GAME_TIME_LONG": [ "阿伟你又在玩电动哦，休息一下吧", "long game time", "long game time" ],
       "THPRAC_ENABLE_GAMETIME_RECORD": [ "在设置界面设置「记录飞行时间」以查看(下一次启动生效)", "enable record game time in Settings to check(works when launch next time)", "enable record game time in Settings to check(works when launch next time)" ],
+      "THPRAC_GAME_TIME_ALL": [ "全部", "All", "すべて" ],
+      "THPRAC_GAME_TIME_DATE": [ "日期", "Date", "日付" ],
+      "THPRAC_GAME_TIME_DETAIL": [ "查看时长详情", "session details", "セッション詳細" ],
+      "THPRAC_GAME_TIME_DURATION": [ "时长", "Duration", "時間" ],
+      "THPRAC_GAME_TIME_SUM": [ "合计", "Total", "合計" ],
       
       "THPRAC_OTHER_NAME": [ "机签", "name", "name" ],
       "THPRAC_OTHER_CLOCK_IN": [ "点击打卡", "Clock in", "Clock in" ],

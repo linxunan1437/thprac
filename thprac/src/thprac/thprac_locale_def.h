@@ -1880,9 +1880,14 @@ enum th_glossary_t {
     TH_TYPE_UNKOWN,
     TH_VALUE,
     TH_WARP,
+    THPRAC_GAME_TIME_ALL,
+    THPRAC_GAME_TIME_DATE,
+    THPRAC_GAME_TIME_DETAIL,
+    THPRAC_GAME_TIME_DURATION,
+    THPRAC_GAME_TIME_SUM,
 };
 
-extern const char* th_glossary_str[3][1871];
+extern const char* th_glossary_str[3][1876];
 
 extern const th_glossary_t TH_TYPE_SELECT[13];
 

@@ -16,6 +16,7 @@ namespace THPrac {
 
 bool GetExeInfo(void* exeBuffer, size_t exeSize, ExeSig& exeSigOut);
 bool GetExeInfoEx(uintptr_t hProcess, uintptr_t base, ExeSig& exeSigOut);
+bool LoadJsonFile(std::wstring& path, void*& buffer, size_t& size);
 
 bool LauncherGamesGuiUpd();
 bool LauncherGamesDestroy();
