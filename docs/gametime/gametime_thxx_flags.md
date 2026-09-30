@@ -109,19 +109,19 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 | th08 | A | ✅ `0x17CE8B0 == 2` | ✅ `0x164D0BA == 0` | ✅ `(0x164D0B4 & 8) == 0` | **已接入** |
 | th09 | A | ❌ | ❌ | ❌ | 未开始 |
 | th095 | A | ❌ | ❌ | ❌ | 未开始 |
-| th10 | B | 🟡 `*(u32*)0x477834 != 0`（PLAYER_PTR） | 🟡 `[0x477810]+0x58 & 0x10 == 0` | 🟡 `[0x477838]+0x10 != 1` | 静态完成，待三态 |
-| th11 | B | 🟡 `*(u32*)0x4a8eb4 != 0`（PLAYER_PTR） | 🟡 `[0x4a8e88]+0x60 & 0x10 == 0` | 🟡 `[0x4a8eb8]+0x10 != 1` | 静态完成，待三态 |
-| th12 | B | 🟡 `*(u32*)0x4b4514 != 0`（PLAYER_PTR） | 🟡 `[0x4b44e8]+0x60 & 0x10 == 0` | 🟡 `[0x4b4518]+0x10 != 1` | 已接入，待三态 |
-| th13 | B | 🟡 `*(u32*)0x4c22c4 != 0`（PLAYER_PTR） | 🟡 `[0x4c2194]+0x60 & 0x10 == 0` | 🟡 `[0x4c22c8]+0x10 != 1` | 已接入，待三态 |
+| th10 | B | ✅ `*(u32*)0x477834 != 0`（PLAYER_PTR） | ✅ `[0x477810]+0x58 & 0x10 == 0` | ✅ `[0x477838]+0x10 != 1` | ✅ **已三态验证（2026-09-30）** |
+| th11 | B | ✅ `*(u32*)0x4a8eb4 != 0`（PLAYER_PTR） | ✅ `[0x4a8e88]+0x60 & 0x10 == 0` | ✅ `[0x4a8eb8]+0x10 != 1` | ✅ **已三态验证（2026-09-30）** |
+| th12 | B | ✅ `*(u32*)0x4b4514 != 0`（PLAYER_PTR） | ✅ `[0x4b44e8]+0x60 & 0x10 == 0` | ✅ `[0x4b4518]+0x10 != 1` | ✅ **已三态验证（2026-09-30）** |
+| th13 | B | ✅ `*(u32*)0x4c22c4 != 0`（PLAYER_PTR） | ✅ `[0x4c2194]+0x60 & 0x10 == 0` | ✅ `[0x4c22c8]+0x10 != 1` | ✅ **已三态验证（2026-09-30）** |
 | th125 | B | ❌ | ❌ | ❌ | 未开始 |
 | th128 | B | ❌ | ❌ | ❌ | 未开始 |
-| th14 | C | 🟡 `*(u32*)0x4db67c != 0`（PLAYER_PTR） | 🟡 `[0x4db558]+0x80 & 0x10 == 0` | 🟡 `[0x4db688]+0x10 != 1` | 已接入，待三态 |
+| th14 | C | ✅ `*(u32*)0x4db67c != 0`（PLAYER_PTR） | ✅ `[0x4db558]+0x80 & 0x10 == 0` | ✅ `[0x4db688]+0x10 != 1` | ✅ **已三态验证（2026-09-30）** |
 | th143 | C | ❌ | ❌ | ❌ | 未开始 |
-| th15 | C | 🟡 `*(u32*)0x4E9BB8 != 0`（PLAYER_PTR） | 🟡 `[0x4E9A94]+0x90 & 0x10 == 0`（**原 `0x4E9B24` 有误，见 §3**） | 🟡 `[0x4E9BC4]+0xc != 1`（**原 `0x4E7ECC != 0xd` 已改，见 §3**） | 已接入，待三态 |
-| th16 | C | 🟡 `*(u32*)0x4a6ef8 != 0`（PLAYER_PTR） | 🟡 `[0x4a6dd4]+0x88 & 0x10 == 0` | 🟡 `[0x4a6f08]+0xc != 1` | 已接入，待三态 |
+| th15 | C | ✅ `*(u32*)0x4E9BB8 != 0`（PLAYER_PTR） | ✅ `[0x4E9A94]+0x90 & 0x10 == 0`（**原 `0x4E9B24` 有误，见 §3**） | ✅ `[0x4E9BC4]+0xc != 1`（**原 `0x4E7ECC != 0xd` 已改，见 §3**） | ✅ **已三态验证（2026-09-30）** |
+| th16 | C | ✅ `*(u32*)0x4a6ef8 != 0`（PLAYER_PTR） | ✅ `[0x4a6dd4]+0x88 & 0x10 == 0` | ✅ `[0x4a6f08]+0xc != 1` | ✅ **已三态验证（2026-09-30）** |
 | th165 | C | ❌ | ❌ | ❌ | 未开始 |
-| th17 | C | 🟡 `*(u32*)0x4b77d0 != 0`（PLAYER_PTR） | 🟡 `[0x4b76b0]+0x8c & 0x10 == 0` | 🟡 `[0x4b77d8]+0xc != 1` | 已接入，待三态 |
-| th18 | C | 🟡 `*(u32*)0x4cf410 != 0`（PLAYER_PTR） | 🟡 `[0x4cf2e4]+0xb0 & 0x10 == 0`（GameThread） | 🟡 `[0x4cf418]+0xc != 1` | 已接入，待三态 |
+| th17 | C | ✅ `*(u32*)0x4b77d0 != 0`（PLAYER_PTR） | ✅ `[0x4b76b0]+0x8c & 0x10 == 0` | ✅ `[0x4b77d8]+0xc != 1` | ✅ **已三态验证（2026-09-30）** |
+| th18 | C | ✅ `*(u32*)0x4cf410 != 0`（PLAYER_PTR） | ✅ `[0x4cf2e4]+0xb0 & 0x10 == 0`（GameThread） | ✅ `[0x4cf418]+0xc != 1` | ✅ **已三态验证（2026-09-30）** |
 | th185 | C | ❌ | ❌ | ❌ | 未开始 |
 | th19 | D | ❌ | ❌ | ❌ | 未开始（需 base+RVA；两个版本条目） |
 | th20 | D | ❌ | ❌ | ⚠️ `0x1c60fc` 已知、offset 待定 | 未开始（需 base+RVA） |
@@ -211,7 +211,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **模式标志静态备选**：`*(u32*)0x474CA0` 的 **bit3(0x8) = replay**（置位处 `0x417D9C: or [0x474ca0],8`，位于 `GS_MODE(0x491FB8) == 0xd` 分支；与 th07/th08 bit3=replay 同构）。该 dword 是静态的，可作为"不想走指针链"时的 replay 备选，但**语义尚未三态验证**。
 
-**⚠️ 挂机演示**：`0x474CA0` 的 bit1(0x2) 用于"跳过 replay 录制"（`0x417A74: test [0x474ca0],2`），疑似 attract demo。用 `PLAYER_PTR != 0` 当 gamemode 时，标题挂机演示是否会被误计，需在三态阶段确认。
+**⚠️ 挂机演示**：`0x474CA0` 的 bit1(0x2) 用于"跳过 replay 录制"（`0x417A74: test [0x474ca0],2`），疑似 attract demo。用 `PLAYER_PTR != 0` 当 gamemode 时，标题挂机演示是否会被误计，已由 2026-09-30 三态验证确认：**attract demo 期间 `PLAYER_PTR` 确实非空**，但 `replay` 字段同时为 `0x1`，判据不成立 → GATE blocked，**不会误计**。
 
 ### th11（B 代 · 地灵殿）—— 静态定位完成，待真机三态
 
@@ -250,7 +250,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **replay 注释**：thprac 现用的 `REPLAY_MGR_PTR → +0x1c → +0xa & 1`（`thprac_th12.cpp:749`）来自 All-Clear 分支 `0x420ABA`，读的是回放**数据头**里的一个位；它与本表的 `[ReplayMgr]+0x10 == 1`（游戏自己判"是否回放"用的）**不是同一个量**，不要混用。优先用 `+0x10 == 1`。
 
-**⚠️ 挂机演示**：与 th10 / th11 同代，`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
+**⚠️ 挂机演示**：与 th10 / th11 同代，`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，已由 2026-09-30 三态验证确认：**attract demo 期间 `PLAYER_PTR` 确实非空**，但 `replay` 字段同时为 `0x1`，判据不成立 → GATE blocked，**不会误计**。
 
 ### th13（B 代 · 神灵庙）—— 静态定位完成并接入，待真机三态
 
@@ -268,7 +268,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **replay 注释**：thprac 现用的 `REPLAY_MGR_PTR → +0x1c → +0xc` 读的是回放**数据头**字段，与本表的 `[ReplayMgr]+0x10 == 1`（游戏自己判"是否回放"用的）**不是同一个量**，不要混用。
 
-**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
+**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，已由 2026-09-30 三态验证确认：**attract demo 期间 `PLAYER_PTR` 确实非空**，但 `replay` 字段同时为 `0x1`，判据不成立 → GATE blocked，**不会误计**。
 
 ### th14（东方辉针城）—— 静态定位完成并接入，待真机三态
 
@@ -286,7 +286,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **⚠️ 只做位测试**：`+0x80` 同偏移另有 bit2（构造器常量 `4`）与 bit11（`0x4367f1: or [edi+0x80],0x800`）等其它语义位，pause 判据必须写 `& 0x10`，不能拿整值比较。
 
-**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
+**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，已由 2026-09-30 三态验证确认：**attract demo 期间 `PLAYER_PTR` 确实非空**，但 `replay` 字段同时为 `0x1`，判据不成立 → GATE blocked，**不会误计**。
 
 报告：`docs/th14/th14_re_disasm_report.md`。
 
@@ -336,7 +336,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **⚠️ 只做位测试**：`+0x88` 同偏移另有 bit2（构造器常量 `4`）与 bit14（`0x4000`，`0x42d7c2: test eax,0x4000`）等其它语义位，pause 判据必须写 `& 0x10`，不能拿整值比较。
 
-**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
+**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，已由 2026-09-30 三态验证确认：**attract demo 期间 `PLAYER_PTR` 确实非空**，但 `replay` 字段同时为 `0x1`，判据不成立 → GATE blocked，**不会误计**。
 
 报告：`docs/th16/th16_re_disasm_report.md`。
 
@@ -357,7 +357,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **⚠️ 只做位测试**：`+0x8c` 同偏移另有 bit2（构造器常量 `4`）与 bit16（`0x10000`，`0x443abe: test [eax+0x8c],0x10000`）等其它语义位，pause 判据必须写 `& 0x10`，不能拿整值比较。
 
-**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
+**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，已由 2026-09-30 三态验证确认：**attract demo 期间 `PLAYER_PTR` 确实非空**，但 `replay` 字段同时为 `0x1`，判据不成立 → GATE blocked，**不会误计**。
 
 报告：`docs/th17/th17_re_disasm_report.md`。
 
@@ -378,7 +378,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **⚠️ 只做位测试**：`+0xb0` 同偏移另有 bit2（构造器常量 `4`）与 bit14（`0x4000`，`0x44388b: test [esi+0xb0],0x4000`）等其它语义位，pause 判据必须写 `& 0x10`，不能拿整值比较。
 
-**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
+**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，已由 2026-09-30 三态验证确认：**attract demo 期间 `PLAYER_PTR` 确实非空**，但 `replay` 字段同时为 `0x1`，判据不成立 → GATE blocked，**不会误计**。
 
 报告：`docs/th18/th18_re_disasm_report.md`。
 
@@ -446,3 +446,4 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 | 2026-09-30 | **th17 静态反编译完成并接入代码**（capstone 只读分析，**未**做真机三态）：gamemode = `PLAYER_PTR(0x4b77d0) != 0`；pause = `[PauseInf(0x4b76b0)]+0x8c` 的 bit4（`0x443b32`/`0x44472c`/`0x44485e`/`0x4449db` OR、`0x445d96`/`0x44602b` AND + `"Pause"`/`"UnPause"`）；replay = `[ReplayMgr(0x4b77d8)]+0xc != 1`（构造器 `0x44dbb0`，游戏自带判据 `0x41ad60`）。新增 `gGateTh17` 并挂到 th17 条目。与 th13/th14/th16 同构，replay mode 偏移 `+0xc`。报告：`docs/th17/th17_re_disasm_report.md`。 |
 | 2026-09-30 | **th18 静态反编译完成并接入代码**（capstone 只读分析，**未**做真机三态）：gamemode = `PLAYER_PTR(0x4cf410) != 0`；pause = `[GameThread(0x4cf2e4)]+0xb0` 的 bit4（`0x4586a5`/`0x45894e`/`0x458aae`/`0x458c2b` OR、`0x45a0ce`/`0x45a39a` AND + `"Pause"`/`"UnPause"`）；replay = `[ReplayMgr(0x4cf418)]+0xc != 1`（构造器 `0x4615e0`，游戏自带判据 `0x42a390`）。新增 `gGateTh18` 并挂到 th18 条目。**更正需求文档猜测**：pause 位在 GameThread，不在 `PAUSE_MENU_PTR(0x4cf40c)`。报告：`docs/th18/th18_re_disasm_report.md`。 |
 | 2026-09-30 | **th15 独立复核并更正接入代码**（capstone 只读分析，**未**做真机三态）：gamemode = `PLAYER_PTR(0x4e9bb8) != 0`（创建 `0x453365`/`0x45404a`、清零 `0x453f04`）；pause = `[PauseInf(0x4e9a94)]+0x90` 的 bit4（更正后的二级读；`0x4E9B24` 全程序 0 引用，原判据恒通过）；replay = `[ReplayInf(0x4e9bc4)]+0xc != 1`（**由原场景状态 `0x4E7ECC != 0xd` 改判**，与 th13/th14 的 ReplayMgr mode 同构）。更正 `gGateTh15`。报告：`docs/th15/th15_re_disasm_report.md`。 |
+| 2026-09-30 | **真机三态验证完成（11 作）**：th07 / th08 复验通过，th10–th18 首次验证通过 —— 每作三态取值互不相同且各自符合判据，`playNs` 只在正常游玩时累计。§2 状态 🟡 → ✅（th06 不变，成熟代码，不在本轮范围）。§3 各作「挂机演示是否误计」注记全部收口为**已确认不误计**：attract demo 期间 `PLAYER_PTR` 确实非空，但 `replay` 字段同时为 `0x1` → 判据不成立 → GATE blocked。另：th10–th18 游玩期间一级指针全程非空；th15 pause（`+0x90` bit4）正常翻转，原恒通过 bug 确认已修。原始证据 `D:\workshop\reasm\gametime\out\<thXX>\`；验证清单见 `docs/gametime/gametime_runtime_verification.md`。 |
