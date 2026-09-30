@@ -38,6 +38,9 @@
 | th12 | B | 静态反编译（本轮新增） | 已接入 | 🟡 **未验证** | 三条 flag（含二级读） |
 | th13 | B | 静态反编译（本轮新增） | 已接入 | 🟡 **未验证** | 三条 flag（含二级读） |
 | th14 | C | 静态反编译（本轮新增） | 已接入 | 🟡 **未验证** | 三条 flag（含二级读） |
+| th16 | C | 静态反编译（本轮新增） | 已接入 | 🟡 **未验证** | 三条 flag（含二级读） |
+| th17 | C | 静态反编译（本轮新增） | 已接入 | 🟡 **未验证** | 三条 flag（含二级读） |
+| th18 | C | 静态反编译（本轮新增） | 已接入 | 🟡 **未验证** | 三条 flag（含二级读） |
 | th15 | C | 静态反编译 + 复核更正 | 已接入（pause/replay 已更正） | 🟡 **未验证** | 三条 flag（含二级读）+ 练习模式/悬空指针 |
 
 > 图例：✅ 已验证 ｜ 🟡 已定案未验证 ｜ ⚠️ 有已知问题需先处理
@@ -138,6 +141,54 @@
 - [ ] STEAM / 汉化变体是否共用同一 RVA（该 gate 条目同时覆盖原版与 Steam 指纹）
 - [ ] 详细证据见 `docs/th14/th14_re_disasm_report.md`
 
+### th16（C 代 · 东方天空璋）—— 三条全未验证（本轮新增）
+
+| 量 | 判据 | 备注 |
+| --- | --- | --- |
+| gamemode | `*(u32*)0x4A6EF8 != 0`（PLAYER_PTR） | 单级读；创建 `0x441cac`（构造器 `0x441c60`，`alloc 0x2c828`）、清零 `0x441b18` |
+| pause | `[0x4A6DD4]+0x88 & 0x10 == 0`（PauseInf，bit4） | 二级读；构造 `0x42d700`；OR `0x43f111`/`0x43f2a1`/`0x43f3de`/`0x43f552`、AND `0x43f6c5`/`0x440add` |
+| replay | `[0x4A6F08]+0xc != 1`（ReplayManager，mode） | 二级读；构造 `0x447760`；游戏自带判据 `0x417f86`/`0x418381`/`0x4428b7` |
+
+- [ ] 三态各采一次，确认 `[0x4A6DD4]` / `[0x4A6F08]` 在游玩期间**非空**（空 → 二级读失败 → 保守不计时）
+- [ ] 确认标题挂机 attract demo 下 `PLAYER_PTR != 0` 是否成立（**误计风险**）
+- [ ] 注意 `0x4A6DD4` 是**指针变量**（PauseInf），必须二级读；`+0x88` 同偏移另有 bit2/bit14 等其它语义位，pause 只做 `& 0x10` 位测试
+- [ ] 注意本作 replay mode 偏移是 **`+0xc`**（与 th13/th14 的 `+0x10` 不同，与 th15 一致），勿按 `+0x10` 读
+- [ ] Continue 菜单是否被 pause 判据覆盖（th07/th08 曾有漏计）
+- [ ] STEAM / 汉化变体是否共用同一 RVA（该 gate 条目同时覆盖原版与 Steam 指纹）
+- [ ] 详细证据见 `docs/th16/th16_re_disasm_report.md`
+
+### th17（C 代 · 东方鬼形兽）—— 三条全未验证（本轮新增）
+
+| 量 | 判据 | 备注 |
+| --- | --- | --- |
+| gamemode | `*(u32*)0x4B77D0 != 0`（PLAYER_PTR） | 单级读；注册 `0x446e6e`（函数 `0x446af0` 内 `memset(obj,0,0x190fc)`）、清零 `0x446f76` |
+| pause | `[0x4B76B0]+0x8c & 0x10 == 0`（PauseInf，bit4） | 二级读；构造 `0x431240`；OR `0x443b32`/`0x44472c`/`0x44485e`/`0x4449db`、AND `0x445d96`/`0x44602b` |
+| replay | `[0x4B77D8]+0xc != 1`（ReplayManager，mode） | 二级读；构造 `0x44dbb0`；游戏自带判据 `0x41ad60`/`0x41b1f9`/`0x447dd7` |
+
+- [ ] 三态各采一次，确认 `[0x4B76B0]` / `[0x4B77D8]` 在游玩期间**非空**（空 → 二级读失败 → 保守不计时）
+- [ ] 确认标题挂机 attract demo 下 `PLAYER_PTR != 0` 是否成立（**误计风险**）
+- [ ] 注意 `0x4B76B0` 是**指针变量**（PauseInf），必须二级读；相邻的 `0x4B76AC` 是另一对象（StageController 类），勿混；`+0x8c` 同偏移另有 bit2/bit16 等其它语义位，pause 只做 `& 0x10` 位测试
+- [ ] 注意本作 replay mode 偏移是 **`+0xc`**（与 th15/th16 一致，th13/th14 为 `+0x10`），勿按 `+0x10` 读
+- [ ] Continue 菜单是否被 pause 判据覆盖（th07/th08 曾有漏计）
+- [ ] STEAM / 汉化变体是否共用同一 RVA（该 gate 条目同时覆盖原版与 Steam 指纹）
+- [ ] 详细证据见 `docs/th17/th17_re_disasm_report.md`
+
+### th18（C 代 · 东方虹龙洞）—— 三条全未验证（本轮新增）
+
+| 量 | 判据 | 备注 |
+| --- | --- | --- |
+| gamemode | `*(u32*)0x4CF410 != 0`（PLAYER_PTR） | 单级读；创建 `0x45afed`（构造器 `0x45af20`，`alloc 0x479d0`）、清零 `0x45b0f6` |
+| pause | `[0x4CF2E4]+0xb0 & 0x10 == 0`（GameThread，bit4） | 二级读；构造 `0x4437b0`；OR `0x4586a5`/`0x45894e`/`0x458aae`/`0x458c2b`、AND `0x45a0ce`/`0x45a39a` |
+| replay | `[0x4CF418]+0xc != 1`（ReplayManager，mode） | 二级读；构造 `0x4615e0`；游戏自带判据 `0x42a390`/`0x42a82a`/`0x45c28d` |
+
+- [ ] 三态各采一次，确认 `[0x4CF2E4]` / `[0x4CF418]` 在游玩期间**非空**（空 → 二级读失败 → 保守不计时）
+- [ ] 确认标题挂机 attract demo 下 `PLAYER_PTR != 0` 是否成立（**误计风险**）
+- [ ] 注意 pause 位在 **GameThread（`0x4CF2E4`）**，**不是** `PAUSE_MENU_PTR(0x4CF40C)`；`+0xb0` 同偏移另有 bit2/bit14 等其它语义位，pause 只做 `& 0x10` 位测试。可对照 thprac 既有 hook `th18_pause_skip_1`（`0x458692`）复核
+- [ ] 注意本作 replay mode 偏移是 **`+0xc`**（与 th15/th16/th17 一致）
+- [ ] Continue 菜单是否被 pause 判据覆盖（th07/th08 曾有漏计）
+- [ ] STEAM / 汉化变体是否共用同一 RVA（该 gate 条目同时覆盖原版与 Steam 指纹）
+- [ ] 详细证据见 `docs/th18/th18_re_disasm_report.md`
+
 ### th15（C 代 · 东方绀珠传）—— 代码已更正，三条待验证（2026-09-30 复核）
 
 `gGateTh15` 已按 `docs/th15/th15_re_disasm_report.md` 更正（原 pause `0x0E9B24` 是 0 引用的伪地址、原 replay 用场景状态）：
@@ -172,7 +223,7 @@ static const THGameTimeGate gGateTh15 {
 - [ ] **回放**（关键）：播放存档 replay → `gamemode` 仍成立但 replay 判据成立 → `playNs` **不涨**
 - [ ] **会话边界**：正常退出 → `gametime_sessions.jsonl` 新增一行且 `durationNs` 与 UI 相符；任务管理器强杀 → 同样新增、延时 < 16 ms；挂机 30 s → `durationNs` 只含真实游玩段
 - [ ] **不污染旧功能**：Others 页"总飞行时间"行为不变；`thpracP.json` 的 `"Gametime"` 照常更新
-- [ ] **未接入作不记录**：如 th09 / th16 玩一局退出 → 不新增行
+- [ ] **未接入作不记录**：如 th09 / th185 玩一局退出 → 不新增行
 - [ ] **launcher 先关**：游戏在跑时关启动器 → 新增一行、`end` = 关闭时刻
 - [ ] **文件格式**：`python -c "import json;[json.loads(l) for l in open(p,encoding='utf-8')]"` 逐行合法 JSON、无 BOM
 
@@ -188,7 +239,7 @@ static const THGameTimeGate gGateTh15 {
 
 ## 5. 影响验证的已知风险 / 开放问题
 
-1. **attract demo 误计（th10 / th11 / th12 / th13 / th14 / th15）**：`PLAYER_PTR != 0` 在标题挂机自动演示时是否成立，需实测；若成立需补一个"非 demo"判据（th08 有现成 bit2 形态可参考）。
+1. **attract demo 误计（th10 / th11 / th12 / th13 / th14 / th15 / th16 / th17 / th18）**：`PLAYER_PTR != 0` 在标题挂机自动演示时是否成立，需实测；若成立需补一个"非 demo"判据（th08 有现成 bit2 形态可参考）。
 2. **续关菜单漏计（th07 / th08，th10~th12 需一并确认）**：`pause == 0` 不覆盖死亡后的 Continue 菜单，那一状态三门控可能全成立。
 3. **指针为空的瞬时**：二级读中一级指针为 0 时 `ReadFlagValue` 返回 false → 该 tick 不计时（保守）。验证时需确认正常游玩期间指针稳定非空，否则会静默少计。
 4. **非原版变体（Steam / 汉化 / 魔改）**：gate 按 `timeStamp + textSize` 匹配，非原版是否共用同一地址**需实测**；汉化版改了 `.text` 段大小可能反而不匹配。
@@ -206,3 +257,6 @@ static const THGameTimeGate gGateTh15 {
 | 2026-09-30 | 新增 th13（B 代）：三条静态判据待三态 —— gamemode `0x4C22C4 != 0`、pause `[0x4C2194]+0x60 & 0x10 == 0`、replay `[0x4C22C8]+0x10 != 1`。详见 `docs/th13/th13_re_disasm_report.md`。 |
 | 2026-09-30 | 新增 th14（C 代，与 th13 同构）：三条静态判据待三态 —— gamemode `0x4DB67C != 0`、pause `[0x4DB558]+0x80 & 0x10 == 0`、replay `[0x4DB688]+0x10 != 1`。详见 `docs/th14/th14_re_disasm_report.md`。 |
 | 2026-09-30 | **th15 更正并接入**：pause 由错误单级静态 `0x0E9B24` 改为二级读 `[0x4E9A94]+0x90 & 0x10 == 0`；replay 由场景状态 `0x4E7ECC != 0xd` 改为 `[0x4E9BC4]+0xc != 1`（ReplayInf mode，与 th13/th14 同构）。新增练习模式/悬空指针验证项。详见 `docs/th15/th15_re_disasm_report.md`。 |
+| 2026-09-30 | 新增 th16（C 代，与 th13/th14 同构）：三条静态判据待三态 —— gamemode `0x4A6EF8 != 0`、pause `[0x4A6DD4]+0x88 & 0x10 == 0`、replay `[0x4A6F08]+0xc != 1`（replay mode 偏移为 `+0xc`，与 th15 一致）。详见 `docs/th16/th16_re_disasm_report.md`。 |
+| 2026-09-30 | 新增 th17（C 代，与 th13/th14/th16 同构）：三条静态判据待三态 —— gamemode `0x4B77D0 != 0`、pause `[0x4B76B0]+0x8c & 0x10 == 0`、replay `[0x4B77D8]+0xc != 1`（replay mode 偏移 `+0xc`）。详见 `docs/th17/th17_re_disasm_report.md`。 |
+| 2026-09-30 | 新增 th18（C 代，与 th13~th17 同构）：三条静态判据待三态 —— gamemode `0x4CF410 != 0`、pause `[0x4CF2E4]+0xb0 & 0x10 == 0`（在 GameThread 而非 PauseMenu）、replay `[0x4CF418]+0xc != 1`。详见 `docs/th18/th18_re_disasm_report.md`。 |

@@ -416,6 +416,21 @@ static const THGameTimeGate gGateTh14 {
     { 0x0DB558, 4, 0x10, GateCmp::BitClear, 0x80 },  // [PauseInf(0x4db558)]+0x80 bit4 = 暂停；置位 0x448e24/0x448f8d/0x449e0a/0x449f8a/0x44b22a，清位 0x449043/0x44aee9
     { 0x0DB688, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x4db688)]+0x10 == 1 = 回放（游戏自带访问器 0x41d640），故取 != 1
 };
+static const THGameTimeGate gGateTh16 {
+    { 0x0A6EF8, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4a6ef8) != 0；创建 0x441cac（alloc 0x2c828）、清零 0x441b18
+    { 0x0A6DD4, 4, 0x10, GateCmp::BitClear, 0x88 },  // [PauseInf(0x4a6dd4)]+0x88 bit4 = 暂停；置位 0x43f111/0x43f2a1/0x43f3de/0x43f552，清位 0x43f6c5/0x440add
+    { 0x0A6F08, 4, 1, GateCmp::Ne, 0x0C },           // [ReplayMgr(0x4a6f08)]+0xc == 1 = 回放（游戏自带判据 0x417f86），故取 != 1
+};
+static const THGameTimeGate gGateTh17 {
+    { 0x0B77D0, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4b77d0) != 0；注册 0x446e6e、清零 0x446f76
+    { 0x0B76B0, 4, 0x10, GateCmp::BitClear, 0x8C },  // [PauseInf(0x4b76b0)]+0x8c bit4 = 暂停；置位 0x443b32/0x44472c/0x44485e/0x4449db，清位 0x445d96/0x44602b
+    { 0x0B77D8, 4, 1, GateCmp::Ne, 0x0C },           // [ReplayMgr(0x4b77d8)]+0xc == 1 = 回放（游戏自带判据 0x41ad60），故取 != 1
+};
+static const THGameTimeGate gGateTh18 {
+    { 0x0CF410, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4cf410) != 0；创建 0x45afed（alloc 0x479d0）、清零 0x45b0f6
+    { 0x0CF2E4, 4, 0x10, GateCmp::BitClear, 0xB0 },  // [GameThread(0x4cf2e4)]+0xb0 bit4 = 暂停；置位 0x4586a5/0x45894e/0x458aae/0x458c2b，清位 0x45a0ce/0x45a39a
+    { 0x0CF418, 4, 1, GateCmp::Ne, 0x0C },           // [ReplayMgr(0x4cf418)]+0xc == 1 = 回放（游戏自带判据 0x42a390），故取 != 1
+};
 
 static THGameSig gGameDefs[] {
     { "alcostg",
@@ -749,7 +764,7 @@ static THGameSig gGameDefs[] {
             { 0x4dae29e4, 0xa1af84f8,
                 0xc6d1d694, 0x8cb29894 },
             { 0x60ebdd82, 0xc012c21a,
-                0x9d875c04, 0x6c1f7fef } } },
+                0x9d875c04, 0x6c1f7fef } } }, &gGateTh16 },
     { "th165",
         L"924650",
         TH165_TITLE,
@@ -781,7 +796,7 @@ static THGameSig gGameDefs[] {
             { 0x3b46eeb2, 0xcd3b5634,
                 0x3e1032a2, 0x22cac0c5 },
             { 0x9fb6f999, 0xcc31ff48,
-                0x57271b1f, 0x82db4030 } } },
+                0x57271b1f, 0x82db4030 } } }, &gGateTh17 },
     { "th175",
         L"1440500",
         TH175_TITLE,
@@ -811,7 +826,7 @@ static THGameSig gGameDefs[] {
             { 0xa3f0a451, 0x85ce8668,
                 0xfa4eda8a, 0xd808c596 },
             { 0x7b13a1f3, 0x3eb0e397,
-                0xa6f5b6ec, 0xcbf302ce } } },
+                0xa6f5b6ec, 0xcbf302ce } } }, &gGateTh18 },
     { "th185",
         L"2097720",
         TH185_TITLE,
