@@ -488,7 +488,7 @@ grep -c '^        "' thprac/src/thprac/thprac_locale_def.cpp   # 期望 3 × 187
 | th10 | B | ❌ | ❌ | ❌ | — |
 | th11 | B | ✅ `0x4a8e88+0x74` | ❌ | ⚠️ `0x4a8eb8→+0xa &1` | 补齐中 |
 | th12 | B | ✅ `0x4b44e8+0x74` | ❌ | ⚠️ `0x4b4518→+0xa &1` | 补齐中 |
-| th13 | B | ❌ | ❌ | ⚠️ `0x4c22c8` 已知、offset 未知 | — |
+| th13 | B | 🟡 `*(u32*)0x4c22c4 != 0` | 🟡 `[0x4c2194]+0x60 & 0x10 == 0` | 🟡 `[0x4c22c8]+0x10 != 1` | 已接入，待三态 |
 | th125 | B′ | ❌ | ❌ | ❌ | — |
 | th128 | B′ | ❌ | ❌ | ❌ | — |
 | th14 | C | ❌ | ❌ | ❌ | `D:\workshop\wind\th14decode` 有既有资料 |
@@ -528,6 +528,8 @@ grep -c '^        "' thprac/src/thprac/thprac_locale_def.cpp   # 期望 3 × 187
 - **调试面板的数据竞争**：面板在 GUI 线程读 `mSessionPlayNs` 等，与工作线程写之间无同步——与旧成员 `mGameTime_ns` 的现状完全一致（本类本来就没做同步）。面板是打样期脚手架，接受。
 
 ## 3.4 端到端验证（施工后执行）
+
+> 待验证项的**聚合清单**见 `docs/gametime/gametime_runtime_verification.md`（逐作 + 逐条 checkbox + 回填模板）。
 
 **构建**（已跑通，exit 0，产出 `Release\thprac.exe`）：
 

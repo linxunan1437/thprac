@@ -401,6 +401,16 @@ static const THGameTimeGate gGateTh11 {
     { 0x0A8E88, 4, 0x10, GateCmp::BitClear, 0x60 },  // [GameThread(0x4a8e88)]+0x60 bit4 = 暂停（PauseInf）
     { 0x0A8EB8, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x4a8eb8)]+0x10 == 1 = 回放，故取 != 1
 };
+static const THGameTimeGate gGateTh12 {
+    { 0x0B4514, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4b4514) != 0
+    { 0x0B44E8, 4, 0x10, GateCmp::BitClear, 0x60 },  // [宿主对象(0x4b44e8)]+0x60 bit4 = 暂停（PauseInf）
+    { 0x0B4518, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x4b4518)]+0x10 == 1 = 回放，故取 != 1
+};
+static const THGameTimeGate gGateTh13 {
+    { 0x0C22C4, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4c22c4) != 0
+    { 0x0C2194, 4, 0x10, GateCmp::BitClear, 0x60 },  // [PauseInf(0x4c2194)]+0x60 bit4 = 暂停；置位 0x43e46a/0x43e61d/0x440aba，清位 0x43e71b/0x440769
+    { 0x0C22C8, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x4c22c8)]+0x10 == 1 = 回放（游戏自带判据 0x413c60），故取 != 1
+};
 
 static THGameSig gGameDefs[] {
     { "alcostg",
@@ -566,7 +576,7 @@ static THGameSig gGameDefs[] {
             { 0xd4d81259, 0xce424514,
                 0x6e7e6326, 0x8b4c0990 },
             { 0x36865d01, 0x4402f03e,
-                0x8d44dabd, 0x65281618 } } },
+                0x8d44dabd, 0x65281618 } }, &gGateTh12 },
     { "th123",
         nullptr,
         TH123_TITLE,
@@ -628,7 +638,7 @@ static THGameSig gGameDefs[] {
             { 0x4619502d, 0xe94742fc,
                 0x13537c7d, 0x7212f384 },
             { 0xd60fa763, 0x380673c1,
-                0x3a3f6475, 0x11dc1f00 } } },
+                0x3a3f6475, 0x11dc1f00 } }, &gGateTh13 },
     { "th135",
         nullptr,
         TH135_TITLE,
