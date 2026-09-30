@@ -33,12 +33,16 @@ struct ExeSig {
 };
 
 // 按局计时门控：读游戏进程内一个内存位置并判定。三位合取 = "正在有效游玩"。
+// 单级：A 代宿主对象是静态对象，字段 = base + rva。
+// 两级：B/C 代宿主对象是堆对象，字段 = *(u32*)(base + rva) + rva2（rva2 != kGameTimeNoChain）。
 enum class GateCmp : uint8_t { Eq, Ne, BitClear };
+constexpr uint32_t kGameTimeNoChain = 0xFFFFFFFFu;
 struct THGameTimeFlag {
-    uint32_t rva;   // 模块内偏移（地址 = base + rva）
-    uint8_t bytes;  // 1 / 2 / 4
+    uint32_t rva;    // 一级：模块内偏移（地址 = base + rva）
+    uint8_t bytes;   // 1 / 2 / 4
     uint32_t value;
     GateCmp cmp = GateCmp::Eq;
+    uint32_t rva2 = kGameTimeNoChain; // 二级偏移；!= kGameTimeNoChain 时先解引用一级指针
 };
 struct THGameTimeGate {
     THGameTimeFlag gamemode; // 关卡进行中
@@ -387,6 +391,16 @@ static const THGameTimeGate gGateTh15 {
     { 0x0E9B24, 4, 0x10, GateCmp::BitClear },// StageController+0x90 bit0x10 = 冻结（Esc / GameOver / Continue）
     { 0x0E7ECC, 4, 0xd, GateCmp::Ne },       // 场景场状态 != 0xd（0xd = 回放/演示播放中）
 };
+static const THGameTimeGate gGateTh10 {
+    { 0x077834, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x477834) != 0
+    { 0x077810, 4, 0x10, GateCmp::BitClear, 0x58 },  // [GameManager(0x477810)]+0x58 bit4 = 暂停（PauseInf）；0x10=冻结
+    { 0x077838, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x477838)]+0x10 == 1 = 回放，故取 != 1
+};
+static const THGameTimeGate gGateTh11 {
+    { 0x0A8EB4, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4a8eb4) != 0
+    { 0x0A8E88, 4, 0x10, GateCmp::BitClear, 0x60 },  // [GameThread(0x4a8e88)]+0x60 bit4 = 暂停（PauseInf）
+    { 0x0A8EB8, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x4a8eb8)]+0x10 == 1 = 回放，故取 != 1
+};
 
 static THGameSig gGameDefs[] {
     { "alcostg",
@@ -506,7 +520,7 @@ static THGameSig gGameDefs[] {
             { 0x11c73117, 0x422a725f,
                 0xc0639015, 0x06050767 },
             { 0x4771b7b2, 0x61a9b6ff,
-                0x77b2d73c, 0xb05af556 } } },
+                0x77b2d73c, 0xb05af556 } }, &gGateTh10 },
     { "th105",
         nullptr,
         TH105_TITLE,
@@ -536,7 +550,7 @@ static THGameSig gGameDefs[] {
             { 0x4e4ad931, 0xa91dc711,
                 0x720e5db7, 0x57a14232 },
             { 0xa6c81bda, 0xab6fea4b,
-                0xb9708f50, 0x31242cdd } } },
+                0xb9708f50, 0x31242cdd } }, &gGateTh11 },
     { "th12",
         L"1100160",
         TH12_TITLE,

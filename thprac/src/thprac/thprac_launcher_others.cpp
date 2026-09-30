@@ -67,9 +67,20 @@ static bool ReadFlagValue(HANDLE hProc, uintptr_t base, const THGameTimeFlag& fl
 {
     if (!flag.rva || (flag.bytes != 1 && flag.bytes != 2 && flag.bytes != 4))
         return false;
+
+    uintptr_t addr = base + flag.rva;
+    if (flag.rva2 != kGameTimeNoChain) {
+        // 两级读：一级是静态指针变量，解引用后再加二级偏移（B/C 代宿主对象是堆对象）。
+        uint32_t ptr = 0;
+        SIZE_T ptrRead = 0;
+        if (!ReadProcessMemory(hProc, (void*)addr, &ptr, sizeof(ptr), &ptrRead) || ptrRead != sizeof(ptr) || !ptr)
+            return false;
+        addr = (uintptr_t)ptr + flag.rva2;
+    }
+
     uint32_t value = 0;
     SIZE_T bytesRead = 0;
-    if (!ReadProcessMemory(hProc, (void*)(base + flag.rva), &value, flag.bytes, &bytesRead) || bytesRead != flag.bytes)
+    if (!ReadProcessMemory(hProc, (void*)addr, &value, flag.bytes, &bytesRead) || bytesRead != flag.bytes)
         return false;
     out = value;
     return true;
