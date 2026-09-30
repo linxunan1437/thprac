@@ -217,16 +217,16 @@ static const THGameTimeGate gGateTh08 {
     { 0x124D0B4, 4, 0x8, GateCmp::BitClear },// GM+0x3DBAC bit3 = replay（该 dword 标题画面基线非 0，只能位测试）
 };
 static const THGameTimeGate gGateTh15 {
-    { 0x0E9BB8, 4, 0, GateCmp::Ne },         // PLAYER_PTR != 0
-    { 0x0E9B24, 4, 0x10, GateCmp::BitClear },// StageController+0x90 bit0x10 = 冻结（Esc / GameOver / Continue）
-    { 0x0E7ECC, 4, 0xd, GateCmp::Ne },       // 场景场状态 != 0xd（0xd = 回放/演示播放中）
+    { 0x0E9BB8, 4, 0, GateCmp::Ne },                 // PLAYER_PTR != 0
+    { 0x0E9A94, 4, 0x10, GateCmp::BitClear, 0x90 },  // [PauseInf(0x4e9a94)]+0x90 bit4 = 暂停（原静态 0x0E9B24 有误，见 flags 文档 §3）
+    { 0x0E9BC4, 4, 1, GateCmp::Ne, 0x0C },           // [ReplayInf(0x4e9bc4)]+0xc != 1 = 非回放（与 th13/th14 同构）
 };
 ```
 
 > th07 / th08 的 pause / replay 已于 2026-09-29 完成反编译 + 三态验证，RVA 直接可用——**P1a 视为已完成**。
-> 判据出处、实测状态数与可选强化见 `docs/gametime/gametime_thxx_flags.md` §3。
+> th10~th15 的判据出处见 `docs/gametime/gametime_thxx_flags.md` §3；th15 的独立复核报告见 `docs/th15/th15_re_disasm_report.md`。
 
-**阈值本身**：`GateCmp` 三种（`Eq` / `Ne` / `BitClear`）已覆盖四作的全部形态（th15 用了后两种）。
+**阈值本身**：`GateCmp` 三种（`Eq` / `Ne` / `BitClear`）已覆盖各作的全部形态。
 **续关菜单（th07/th08）**：flags 文档提出的 bit-2 强化形态**未经三态验证**，P0 仍用已验证的 `pause == 0`；漏计记为已知项，留 P2 评估。
 
 **TH06 三处地址的推导（可复核）**：`GAME_MANAGER = 0x69BCA0`（`thprac_th06.cpp:29`），`GameManager` 定义在 `thprac/src/thprac/thprac_th06.h:66-121`。
@@ -238,7 +238,7 @@ static const THGameTimeGate gGateTh15 {
 
 **求值与降级**：
 
-- 短路顺序固定 `gamemode → pause → replay`；任一项不通过即返回 false，**不再读后续地址**。好处：菜单里每 tick 只花 1 次 RPM；避免在非法上下文读地址（th15 的 `0x4E9B24` 就只在关卡存活期有效，必须在 `PLAYER_PTR != 0` 之后读）。
+- 短路顺序固定 `gamemode → pause → replay`；任一项不通过即返回 false，**不再读后续地址**。好处：菜单里每 tick 只花 1 次 RPM；避免在非法上下文读地址（如 th10+ 的二级读必须先确认一级指针非空，`gamemode = PLAYER_PTR != 0` 天然充当这个前置）。
 - 读取：`ReadProcessMemory(hProc, (void*)(base + rva), &v, bytes, &n)`；`bytes` 必须是 1/2/4，且 `n != bytes` 也算失败。任一读失败即本 tick 视为"不计时"（保守，避免游戏崩溃瞬间刷时间）。
 - `gametimeGate == nullptr` 的作**不建会话、不落盘**（与"分批推"一致，也避免纯墙钟时长混进统计池）。
 - RPM 连续失败 → 本会话时长偏短（不落"纯墙钟"的假数据，比初版方案更保守）。
@@ -419,8 +419,8 @@ grep -c '^        "' thprac/src/thprac/thprac_locale_def.cpp   # 期望 3 × 187
 | 量 | th06 参考 | th15 参考 | 语义 |
 | --- | --- | --- | --- |
 | gamemode | `*(DWORD*)0x6C6EA4 == 2` | `PLAYER_PTR(0x4E9BB8) != 0` | 关卡进行中（排除标题 / 菜单 / 选人） |
-| pause | `*(BYTE*)0x69D4BF == 0` | `(*(uint32_t*)0x4E9B24 & 0x10) == 0` | 游戏自身暂停菜单未打开（**不是** thprac 自己的 `THPauseMenu`） |
-| replay | `*(byte*)0x69BCBC == 0` | `*(uint32_t*)0x4E7ECC != 0xd` | 未在播放 replay |
+| pause | `*(BYTE*)0x69D4BF == 0` | `(*(uint32_t*)(*(uint32_t*)0x4E9A94 + 0x90) & 0x10) == 0` | 游戏自身暂停菜单未打开（**不是** thprac 自己的 `THPauseMenu`） |
+| replay | `*(byte*)0x69BCBC == 0` | `*(uint32_t*)(*(uint32_t*)0x4E9BC4 + 0xc) != 1` | 未在播放 replay |
 
 ⚠️ **注意区分**：多作里已有的 `CheckReplay()`（如 `thprac_th10.cpp:404`）是**读取 replay 文件参数**（`ReplayLoadParam`），与"实时是否在回放"是两件事，**不能复用**。
 
@@ -493,7 +493,7 @@ grep -c '^        "' thprac/src/thprac/thprac_locale_def.cpp   # 期望 3 × 187
 | th128 | B′ | ❌ | ❌ | ❌ | — |
 | th14 | C | ❌ | ❌ | ❌ | `D:\workshop\wind\th14decode` 有既有资料 |
 | th143 | C | ❌ | ❌ | ❌ | — |
-| **th15** | C | ✅ `0x4E9BB8 != 0` | ✅ `(0x4E9B24&0x10)==0` | ✅ `0x4E7ECC != 0xd` | **✅ 已接入** |
+| **th15** | C | 🟡 `*(u32*)0x4E9BB8 != 0` | 🟡 `[0x4E9A94]+0x90 & 0x10 == 0` | 🟡 `[0x4E9BC4]+0xc != 1` | 已接入，待三态 |
 | th16 | C | ❌ | ❌ | ❌ | — |
 | th165 | C | ❌ | ❌ | ❌ | — |
 | th17 | C | ❌ | ❌ | ❌ | — |
@@ -525,6 +525,7 @@ grep -c '^        "' thprac/src/thprac/thprac_locale_def.cpp   # 期望 3 × 187
 - **会话起点精度**：绑定由探针发现驱动，`start` 最多晚一个探针节拍（**1 s**）。刻意**不**动这个节拍、也**不**改 `LaunchGameDirectly` 去换取"精确到 `ResumeThread` 前"（§1.3）——`start` 只是墙钟元数据，而 `playNs` 要等门控通过才累加，两者都不值得为它改既有代码。
 - **exe 名快筛可能漏**：`ExeNameLooksLikeTouhou` 照搬 `CheckProcessOmni` 的白名单 + `thNN` 形态。若某个魔改/汉化版改了 exe 名且不在白名单里，该局不记录（与 launcher 自己的"找游戏"路径同一限制，行为一致）。绑定是一次性的，**不会中途补救**——这是刻意的：宁可不记录，也不要一条起点是半局的静默错数据。
 - **续关菜单漏计（th07 / th08）**：`pause == 0` 不覆盖死亡后的 Continue 菜单（`GM+0x93DD` / `GM+0x3DBB3`），那一状态下三个判据全成立会误计。flags 文档给了 bit-2 强化形态但**未经三态验证**，P0 不采用；记入 P2。
+- **th15 ReplayInf 指针**：`[0x4E9BC4]`（ReplayInf mode）在练习模式下是否创建、退出关卡后未清零是否悬空，均需真机确认（`gamemode` 短路后理论上安全）；备选判据场景状态 `0x4E7ECC != 0xd` 留作对照。见 `docs/th15/th15_re_disasm_report.md` §2、§6。
 - **调试面板的数据竞争**：面板在 GUI 线程读 `mSessionPlayNs` 等，与工作线程写之间无同步——与旧成员 `mGameTime_ns` 的现状完全一致（本类本来就没做同步）。面板是打样期脚手架，接受。
 
 ## 3.4 端到端验证（施工后执行）
@@ -562,6 +563,7 @@ grep -c '^        "' thprac/src/thprac/thprac_locale_def.cpp   # 期望 3 × 187
 | 2026-09-29 | **极简版落地（P0）**。复核确认初版的 8 处里只有 1 处是功能数据本身（gate 表），其余 7 处都在解决"拿不到 `ReadProcessMemory` 的入参"。按"统一走枚举 + 就地扩展 `THGameTimeRecorder`"重做，**改动收敛到 2 个文件、零新增文件**（§1.7 的对照表列出被砍的 6 处及依据）。同时：th07 / th08 的 pause / replay 已定案并三态验证，`gGateTh07` / `gGateTh08` 填上真值，P1a 结项。实现后 `Release\|x86` 整包构建通过。 |
 | 2026-09-29 | **回退一处越界改动**：P0 初版顺手把探测节拍从 1 s 收到 100 ms，属于修改既有行为去换取 `start` 字段的精度——而 `start` 只是墙钟元数据，`playNs` 并不受影响（要等门控通过才开始累加）。**已改回原有的 `> 1000000000` / `// test every second`**。既有代码的节拍不为本功能服务。 |
 | 2026-09-29 | **P3 详情页落地**（§1.9）。Others 页新增「查看时长详情」二级页：作品 + 月份筛选、逐日汇总、合计行。改动集中在 `thprac_launcher_others.cpp`（解析 4 个 static + `THOthersGui` 换页）；`THGameTimeRecorder::Gui()` 由 `void` 改 `bool`（唯一调用点）；`thprac_launcher_games.h` 补 1 行 `LoadJsonFile` 声明以复用既有读文件；手工同步 5 个 locale 词条到生成文件。记录/门控/落盘路径**一行未动**。 |
+| 2026-09-30 | **th15 复核并更正**（§1.4、§2.1、§3.1）：pause 由错误单级静态 `0x0E9B24`（全程序 0 引用、判据恒通过）改为二级读 `[PauseInf(0x4E9A94)]+0x90` bit4；replay 由场景状态 `0x4E7ECC != 0xd` 改为 `[ReplayInf(0x4E9BC4)]+0xc != 1`（与 th13/th14 的 ReplayMgr mode 同构）。报告：`docs/th15/th15_re_disasm_report.md`。 |
 
 ### 实现与初版方案的差异（一句话版）
 

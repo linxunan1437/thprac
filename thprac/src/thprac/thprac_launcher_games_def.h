@@ -387,9 +387,9 @@ static const THGameTimeGate gGateTh08 {
     { 0x124D0B4, 4, 0x8, GateCmp::BitClear },// GM+0x3DBAC bit3 = replay（该 dword 标题画面基线非 0，只能位测试）
 };
 static const THGameTimeGate gGateTh15 {
-    { 0x0E9BB8, 4, 0, GateCmp::Ne },         // PLAYER_PTR != 0
-    { 0x0E9B24, 4, 0x10, GateCmp::BitClear },// StageController+0x90 bit0x10 = 冻结（Esc / GameOver / Continue）
-    { 0x0E7ECC, 4, 0xd, GateCmp::Ne },       // 场景场状态 != 0xd（0xd = 回放/演示播放中）
+    { 0x0E9BB8, 4, 0, GateCmp::Ne },                 // gamemode: PLAYER_PTR(0x4e9bb8) != 0；创建 0x453365/0x45404a、清零 0x453f04
+    { 0x0E9A94, 4, 0x10, GateCmp::BitClear, 0x90 },  // pause: [PauseInf(0x4e9a94)]+0x90 bit4 = 暂停（原静态 0x0E9B24 全程序 0 引用，已弃用）
+    { 0x0E9BC4, 4, 1, GateCmp::Ne, 0x0C },           // replay: [ReplayInf(0x4e9bc4)]+0x0c == 1 = 回放，故取 != 1（与 th13 同构）
 };
 static const THGameTimeGate gGateTh10 {
     { 0x077834, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x477834) != 0
@@ -410,6 +410,11 @@ static const THGameTimeGate gGateTh13 {
     { 0x0C22C4, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4c22c4) != 0
     { 0x0C2194, 4, 0x10, GateCmp::BitClear, 0x60 },  // [PauseInf(0x4c2194)]+0x60 bit4 = 暂停；置位 0x43e46a/0x43e61d/0x440aba，清位 0x43e71b/0x440769
     { 0x0C22C8, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x4c22c8)]+0x10 == 1 = 回放（游戏自带判据 0x413c60），故取 != 1
+};
+static const THGameTimeGate gGateTh14 {
+    { 0x0DB67C, 4, 0, GateCmp::Ne },                 // PLAYER_PTR(0x4db67c) != 0；创建 0x44c44a（alloc 0x184c0）、清零 0x44d17a
+    { 0x0DB558, 4, 0x10, GateCmp::BitClear, 0x80 },  // [PauseInf(0x4db558)]+0x80 bit4 = 暂停；置位 0x448e24/0x448f8d/0x449e0a/0x449f8a/0x44b22a，清位 0x449043/0x44aee9
+    { 0x0DB688, 4, 1, GateCmp::Ne, 0x10 },           // [ReplayMgr(0x4db688)]+0x10 == 1 = 回放（游戏自带访问器 0x41d640），故取 != 1
 };
 
 static THGameSig gGameDefs[] {
@@ -668,7 +673,7 @@ static THGameSig gGameDefs[] {
             { 0x08a6fde4, 0xb4344a4a,
                 0xa3636647, 0x387d4253 },
             { 0x5edd7a93, 0x774d84b,
-                0x5df1b298, 0x210f5fc8 } } },
+                0x5df1b298, 0x210f5fc8 } }, &gGateTh14 },
     { "th143",
         L"937570",
         TH143_TITLE,

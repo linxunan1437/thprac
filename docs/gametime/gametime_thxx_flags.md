@@ -115,9 +115,9 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 | th13 | B | 🟡 `*(u32*)0x4c22c4 != 0`（PLAYER_PTR） | 🟡 `[0x4c2194]+0x60 & 0x10 == 0` | 🟡 `[0x4c22c8]+0x10 != 1` | 已接入，待三态 |
 | th125 | B | ❌ | ❌ | ❌ | 未开始 |
 | th128 | B | ❌ | ❌ | ❌ | 未开始 |
-| th14 | C | ❌ | ❌ | ❌ | 未开始（有既有反编译资料） |
+| th14 | C | 🟡 `*(u32*)0x4db67c != 0`（PLAYER_PTR） | 🟡 `[0x4db558]+0x80 & 0x10 == 0` | 🟡 `[0x4db688]+0x10 != 1` | 已接入，待三态 |
 | th143 | C | ❌ | ❌ | ❌ | 未开始 |
-| th15 | C | ✅ `0x4E9BB8 != 0` | 🟡 `[0x4E9A94]+0x90 & 0x10 == 0`（**原 `0x4E9B24` 有误，见 §3**） | ✅ `0x4E7ECC != 0xd` | 已接入（pause 待修） |
+| th15 | C | 🟡 `*(u32*)0x4E9BB8 != 0`（PLAYER_PTR） | 🟡 `[0x4E9A94]+0x90 & 0x10 == 0`（**原 `0x4E9B24` 有误，见 §3**） | 🟡 `[0x4E9BC4]+0xc != 1`（**原 `0x4E7ECC != 0xd` 已改，见 §3**） | 已接入，待三态 |
 | th16 | C | ❌ | ❌ | ❌ | 未开始 |
 | th165 | C | ❌ | ❌ | ❌ | 未开始 |
 | th17 | C | ❌ | ❌ | ❌ | 未开始 |
@@ -129,6 +129,7 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 > **2026-09-30 更正**：th11 原记录 `gamemode = 0x4a8e88 + 0x74` 有误——`GameThread+0x74` 是关卡启动时传给 `ReplayManager::Start` 的 mode（`0x41FC27`），不是"关卡进行中"。th12 的类比条目（`0x4b44e8 + 0x74`）**同日复核确认同因**：th12 宿主对象构造器 `0x422755: mov [edi+0x74],eax` 同样存的是传给 `ReplayManager::Start` 的 mode，故已推翻；th12 改用 `PLAYER_PTR != 0`（详见 §3 th12）。
 > th15 原 pause 记录 `0x4E9B24` 也有误（那是"指针变量 `0x4E9A94` + 0x90"算出来的静态地址，实际字段在堆对象里，`0x4E9B24` 全程序 0 引用），详见 §3 th15。
+> th15 replay 原记录 `0x4E7ECC != 0xd`（场景状态）同日改为 `[0x4E9BC4]+0xc != 1`（ReplayInf mode，与 th13/th14 同构），详见 §3 th15。
 
 ---
 
@@ -269,26 +270,55 @@ B 代起（th10+）宿主对象改为**堆对象、挂在静态指针变量后�
 
 **⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
 
-### th15（C 代 · 参照作）—— **pause 判据已更正（2026-09-30）**
+### th14（东方辉针城）—— 静态定位完成并接入，待真机三态
+
+| 量 | 对象 / 指针链（VA） | RVA | 判据 | 出处（反汇编，基址 `0x400000`） |
+| --- | --- | --- | --- | --- |
+| gamemode | `*(u32*)0x4db67c`（PLAYER_PTR） | `0x0DB67C` | `!= 0` | 现成定义 `thprac_th14.cpp:16`；赋值 `0x44c44a`（`alloc 0x184c0`）、清零 `0x44d17a` |
+| pause | `[0x4db558]+0x80`（PauseInf，bit4） | 一级 `0x0DB558`，二级 `+0x80` | `& 0x10 == 0` | 置位 `0x448e24`/`0x448f8d`/`0x449e0a`/`0x449f8a`/`0x44b22a`（`mov reg,[0x4db558]` → `or [reg+0x80],0x10` + `"Pause"`）；清位 `0x449043`/`0x44aee9`（`and [eax+0x80],0xffffffef` + `"UnPause"`） |
+| replay | `[0x4db688]+0x10`（ReplayManager，mode） | 一级 `0x0DB688`，二级 `+0x10` | `!= 1` | 游戏自带访问器 `0x41d640: mov ecx,[0x4db688]; xor eax,eax; cmp [ecx+0x10],1; sete al`；构造器 `0x454630` 存 mode（mode0→`0x45464c`、mode1→`0x4549b6` 各存指针），清零 `0x454e2b` |
+
+**与 th13 同构（B 代模板成立）**：宿主对象是**堆对象、挂在静态指针变量后**，必须二级读。差异仅在 PauseInf 字段偏移：th13 是 `+0x60`，th14 是 `+0x80`；replay 仍为 `+0x10 == 1`，gamemode 仍为 `PLAYER_PTR != 0`：
+
+- PauseInf 指针 `0x4db558` 由构造器 `0x436560` 写入：`alloc 0x9c` → `0x4365ac: or [esi+0x80],4` → `0x4365b9: mov [0x4db558],esi`；清零点 `0x4364ee: mov [0x4db558],0`。全程序与暂停语义相关（imm `0x10`/`0xffffffef`）的 7 处 `or/and [reg+0x80]` 基址全部来自 `[0x4db558]` ⇒ 语义单一。
+- ReplayManager 指针 `0x4db688` 由构造器 `0x454630` 写入（`0x45463b: mov [ebx+0x10],eax` 存 mode）。
+- trace 串锚点：`"Pause"`（`0x4bedbc`）/`"UnPause"`（`0x4bedb4`）/`"src\game\pause.cpp:216 PauseInf"`（`0x4bec38`）；replay 侧 `"initialize ReplayInf"`（`0x4bef5c`）/`"replay/%s"`（`0x4bf058`）/`"th14_%.2d.rpy"`（`0x4bed98`）。
+
+**⚠️ 只做位测试**：`+0x80` 同偏移另有 bit2（构造器常量 `4`）与 bit11（`0x4367f1: or [edi+0x80],0x800`）等其它语义位，pause 判据必须写 `& 0x10`，不能拿整值比较。
+
+**⚠️ 挂机演示**：`PLAYER_PTR != 0` 在标题挂机 attract demo 下是否被误计，需在三态阶段确认。
+
+报告：`docs/th14/th14_re_disasm_report.md`。
+
+### th15（C 代）—— **静态定位完成并接入，待真机三态（2026-09-30 复核）**
 
 | 量 | 地址 / 指针链 | RVA | 判据 | 出处 |
 | --- | --- | --- | --- | --- |
-| gamemode | `0x4E9BB8`（PLAYER_PTR，静态指针变量） | `0x0E9BB8` | `!= 0` | `thprac_th15.cpp:14` |
-| pause | `[0x4E9A94]+0x90`（StageController，bit4） | 一级 `0x0E9A94`，二级 `+0x90` | `& 0x10 == 0` | 反编译结论（见下） |
-| replay | `0x4E7ECC` | `0x0E7ECC` | `!= 0xd` | 反编译结论（见下） |
+| gamemode | `*(u32*)0x4E9BB8`（PLAYER_PTR，静态指针变量） | `0x0E9BB8` | `!= 0` | `thprac_th15.cpp:14`；创建 `0x453365`/`0x45404A`、清零 `0x453F04` |
+| pause | `[0x4E9A94]+0x90`（PauseInf，bit4） | 一级 `0x0E9A94`，二级 `+0x90` | `& 0x10 == 0` | 构造 `0x43CB80`；置位 `0x450E2A`/`0x451006`/`0x451192`/`0x4512E0`（+ `"Pause"`）、清位 `0x452942`（+ `"UnPause"`） |
+| replay | `[0x4E9BC4]+0xc`（ReplayInf，mode） | 一级 `0x0E9BC4`，二级 `+0xc` | `!= 1` | 构造 `0x45B630`（mode 0 录制写 `"t15r"` / mode 1 回放读文件）；每关起始 `0x43C46B` 调 `ReplayMgr::Start(0x45BE60)` |
 
-**⚠️ 更正（2026-09-30）**：原 gate 把 pause 写成静态 `0x0E9B24`（VA `0x4E9B24`），注释"StageController + 0x90"——这是把**指针变量**当成了**静态对象**。反汇编证据：
+**⚠️ pause 更正（2026-09-30）**：原 gate 把 pause 写成静态 `0x0E9B24`（VA `0x4E9B24`），注释"StageController + 0x90"——这是把**指针变量**当成了**静态对象**：
 
-- `0x4E9A94` 是**指向堆对象（StageController）的静态指针变量**：构造/赋值在 `0x43CBE3: mov [0x4E9A94],esi`（`esi` 为刚构造出的对象，紧邻 `0x43CBD6: or [esi+0x90],4`）。
+- `0x4E9A94` 是**指向堆对象（PauseInf）的静态指针变量**：构造/赋值在 `0x43CBE3: mov [0x4E9A94],esi`（`esi` 为刚构造出的对象，紧邻 `0x43CBD6: or [esi+0x90],4`），清零点 `0x43CB08`。
 - Pause：`0x451113: mov edi,[0x4E9A94]` → `0x451192: or dword ptr [edi+0x90],0x10`（+ `"Pause"`）；UnPause：`0x45293D: mov eax,[0x4E9A94]` → `0x452942: and dword ptr [eax+0x90],0xffffffef`（+ `"UnPause"`）。
 - **`0x4E9B24` 在 th15.exe 里被引用 0 次**（无读无写）⇒ 原 gate 读的是无关 `.data`，pause 判据实际**恒通过**（暂停也会被计时）。必须改成二级指针。
-- 全程序没有任何"取 `0x4E9A94` 作对象基址"的指令（无 `mov reg,0x4E9A94` / `lea reg,[0x4E9A94]`），可确认它不是静态对象。
+- 全程序没有任何"取 `0x4E9A94` 作对象基址"的指令（无 `lea reg,[0x4E9A94]`），可确认它不是静态对象。
 
-gamemode / replay 两条仍是**真正的静态读**：`0x4E9BB8` 是静态指针变量（只读其值判非空，无需解引用）；`0x4E7ECC` 是场景状态 dword（有大量直接引用，`0xd` = 回放/演示播放中）。更正后的门控式：
+**⚠️ replay 更正（2026-09-30）**：replay 由场景状态 `0x4E7ECC != 0xd` 改为 **ReplayInf mode `[0x4E9BC4]+0xc != 1`**，与 th13 / th14 的 `[ReplayMgr]+0x10 != 1` 同构：
 
-`PLAYER_PTR(0x4E9BB8) != 0 && *(u32*)0x4E7ECC != 0xd && (*(u32*)(*(u32*)0x4E9A94 + 0x90) & 0x10) == 0`
+- `0x4E9BC4` 是 ReplayInf 指针变量：构造 `0x45B630` 存 `[obj+0xc]=mode`；mode 0（录制）在 `0x45B64C` 发布并写 `"t15r"`，mode 1（回放）在 `0x45B9B6` 发布 + `0x45CC80` 读回放文件。
+- `ReplayMgr::Start(0x45BE60)` 在关卡起始 `0x43C46B` 调用一次，mode 取自 `[PauseInf+0xB4]`；回放期该 mode 为 1 时暂停键失效（`0x451119`/`0x4512B8`），与判据互证。
+- 弃用候选：`0x4E7ECC` 场景状态（`0xd` 在 `0x4609A0`/`0x468489` 写入，与 th10 的 `GS_MODE==0xd` 同构）。弃用理由：`0x4E7ECC == 0xd` 无消费点、无法证明回放期稳定保持 `0xd`；留作真机对照采样。
+- ⚠️ `0x4E9BC4` **无清零点**（回放结束只 `free`@`0x43C7CC`，指针不置 0），靠 `gamemode` 短路兜底；练习模式是否创建 ReplayInf 需实测。
 
-> ⚠️ 该条目的 `pause` / `replay` 语义映射与 th06 不同（th15 的三个量并非"三个独立布尔"，而是三种不同来源的判据）。写进 `THGameTimeGate` 时按 §0 的格式映射即可（`gamemode` = `Ne 0`，`pause` = 链上 `BitClear 0x10`，`replay` = `Ne 0xd`）。
+更正后的门控式：
+
+`PLAYER_PTR(0x4E9BB8) != 0 && (*(u32*)(*(u32*)0x4E9A94 + 0x90) & 0x10) == 0 && *(u32*)(*(u32*)0x4E9BC4 + 0xc) != 1`
+
+> ⚠️ 该条目的三个量均为不同来源的判据（PLAYER_PTR 单级 / PauseInf 二级位 / ReplayInf 二级 mode）。对应 `THGameTimeGate`：`gamemode` = `Ne 0`，`pause` = 链上 `BitClear 0x10`，`replay` = 链上 `Ne 1`（二级偏移 `+0xc`）。
+
+报告：`docs/th15/th15_re_disasm_report.md`。
 
 ---
 
@@ -306,9 +336,9 @@ gamemode / replay 两条仍是**真正的静态读**：`0x4E9BB8` 是静态指�
 | th13 | `PLAYER_PTR = 0x4c22c4`、`REPLAY_MGR_PTR = 0x4c22c8`（`thprac_th13.cpp:14-16`）、PauseInf 指针 `0x4c2194` | 判据已定案（见 §3） |
 | th125 | — | — |
 | th128 | `PLAYER_PTR = 0x4B8A80`（`thprac_th128.cpp:8`） | — |
-| th14 | `PLAYER_PTR = 0x4db67c`、`BOMB_PTR = 0x4DB52C`、`ENEMY_MANAGER_PTR = 0x4db544`、`CHARA_ADDR = 0x4f5828`（`thprac_th14.cpp:12-16`） | 另有既有资料 `D:\workshop\wind\th14decode` |
+| th14 | `PLAYER_PTR = 0x4db67c`、`BOMB_PTR = 0x4DB52C`、`ENEMY_MANAGER_PTR = 0x4db544`、`CHARA_ADDR = 0x4f5828`（`thprac_th14.cpp:12-16`）；PauseInf 指针 `0x4db558`、ReplayMgr 指针 `0x4db688` | 判据已定案（见 §3） |
 | th143 | — | — |
-| th15 | `PLAYER_PTR = 0x4e9bb8`、`BOMB_PTR = 0x4e9a68`（`thprac_th15.cpp:13-14`） | 已完成 |
+| th15 | `PLAYER_PTR = 0x4e9bb8`、`BOMB_PTR = 0x4e9a68`（`thprac_th15.cpp:13-14`）；PauseInf 指针 `0x4e9a94`、ReplayInf 指针 `0x4e9bc4` | 判据已定案（见 §3） |
 | th16 | `ENEMY_MANAGER_PTR = 0x4a6dc0`、`PLAYER_PTR = 0x4a6ef8`（`thprac_th16.cpp:12-13`） | — |
 | th165 | — | — |
 | th17 | `PLAYER_PTR = 0x4b77d0`、`ENEMY_MANAGER_PTR = 0x4b76a0`、`GOAST_MANAGER_PTR = 0x4b7684`、`SPELLCARD_PTR = 0x4b7690`、`WINDOW_PTR = 0x5226c0`（`thprac_th17.cpp:78-82`） | — |
@@ -349,3 +379,5 @@ gamemode / replay 两条仍是**真正的静态读**：`0x4E9BB8` 是静态指�
 | 2026-09-30 | **更正 th11 的 gamemode 线索**：`0x4a8e88 + 0x74` 实为传给 `ReplayManager::Start` 的 mode，不是"关卡进行中"；th12 的类比条目需重查。见 §2 注与 §3 th11。 |
 | 2026-09-30 | **th12 静态反编译完成并接入代码**（capstone 只读分析，**未**做真机三态）：gamemode = `PLAYER_PTR(0x4b4514) != 0`；pause = `[0x4b44e8]+0x60` 的 bit4（`0x432850` OR / `0x432960` AND + `"Pause"`/`"UnPause"`）；replay = `[0x4b4518]+0x10 != 1`（`0x43AE80` 存 mode + `"t12r"`）。新增 `gGateTh12` 并挂到 th12 条目。原 `0x4b44e8 + 0x74` gamemode 线索与 th11 同因，已推翻；`+0xa & 1` 是回放数据头位，不可与 `+0x10 == 1` 混用。见 §3 th12。 |
 | 2026-09-30 | **th13 静态反编译完成并接入代码**（capstone 只读分析，**未**做真机三态）：gamemode = `PLAYER_PTR(0x4c22c4) != 0`；pause = `[PauseInf(0x4c2194)]+0x60` 的 bit4（`0x43e46a`/`0x43e61d`/`0x440aba` OR、`0x43e71b`/`0x440769` AND + `"Pause"`/`"UnPause"`）；replay = `[ReplayMgr(0x4c22c8)]+0x10 != 1`（游戏自带访问器 `0x413c60: cmp [ecx+0x10],1; sete al`）。新增 `gGateTh13` 并挂到 th13 条目。与 th12 同构。报告：`docs/th13/th13_re_disasm_report.md`。 |
+| 2026-09-30 | **th14 静态反编译完成并接入代码**（capstone 只读分析，**未**做真机三态）：gamemode = `PLAYER_PTR(0x4db67c) != 0`；pause = `[PauseInf(0x4db558)]+0x80` 的 bit4（`0x448e24`/`0x448f8d`/`0x449e0a`/`0x449f8a`/`0x44b22a` OR、`0x449043`/`0x44aee9` AND + `"Pause"`/`"UnPause"`）；replay = `[ReplayMgr(0x4db688)]+0x10 != 1`（游戏自带访问器 `0x41d640: cmp [ecx+0x10],1; sete al`）。新增 `gGateTh14` 并挂到 th14 条目。与 th13 同构（仅 pause 偏移由 `+0x60` 变 `+0x80`）。报告：`docs/th14/th14_re_disasm_report.md`。 |
+| 2026-09-30 | **th15 独立复核并更正接入代码**（capstone 只读分析，**未**做真机三态）：gamemode = `PLAYER_PTR(0x4e9bb8) != 0`（创建 `0x453365`/`0x45404a`、清零 `0x453f04`）；pause = `[PauseInf(0x4e9a94)]+0x90` 的 bit4（更正后的二级读；`0x4E9B24` 全程序 0 引用，原判据恒通过）；replay = `[ReplayInf(0x4e9bc4)]+0xc != 1`（**由原场景状态 `0x4E7ECC != 0xd` 改判**，与 th13/th14 的 ReplayMgr mode 同构）。更正 `gGateTh15`。报告：`docs/th15/th15_re_disasm_report.md`。 |
