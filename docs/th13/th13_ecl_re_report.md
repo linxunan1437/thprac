@@ -1,0 +1,683 @@
+# TH13 ECL 段落监控 — 逆向结论（Q1–Q9）
+
+> 对应需求：`docs/th13/th13_ecl_re_requests.md`；总括：`docs/logger/logger_re_disasm_overview.md`；方法论范例（结构参照）：`docs/th16/th16_ecl_re_report.md`、`docs/th15/th15_ecl_re_report.md`。
+> 二进制：`../exes/th13.exe`，790528 B，PE `TimeDateStamp = 1313589413`，`ImageBase = 0x400000`，`RELOCS_STRIPPED`
+> （⇒ **RVA = VA − 0x400000**）。`.text` = VA `0x401000`–`0x4A2275`，RVA `0x1000`–`0xA2275`，`SizeOfRawData = 0xA0400`，与 `thprac_launcher_games_def.h` 的 th13 ORIGINAL 条目一致。
+> 引擎代：**B 代**；同代参照：th10/th11/th12（均**无**报告，仅 requests）。
+> 方法：`pefile` + `capstone 5.0.7` 只读反汇编（自写脚本 `D:\workshop\reasm\th13\dl.py`），用「原始字节搜索 + 局部对齐 + 函数入口整段反汇编」定位（避开 `.text` 线性反汇编失步，见 `th13_re_disasm_report.md` §5 的坑）。
+> 本机**无 th13 `.ecl`**（离线脚本只有 th07/th08），故「名字 ↔ 段落入口」的离线枚举**无法完成**。
+> 状态：**静态定案（🟡 已定案、未真机三态）**。本机无法运行 th13，**未做任何真机验证**。
+> 地址口径：正文以 **VA** 为主，并标注 **RVA = VA − 0x400000**。
+> 置信度图例：✅ 反汇编直接证实 ｜ 🟡 有强证据但缺一环（显式标注缺口）｜ ❌ 未能定案。
+
+---
+
+## 0. 结论速览
+
+| 问题 | 结论 | 一句话 |
+| --- | --- | --- |
+| **Q1 当前 sub = 索引？指令指针？** | ✅ **是「指令地址（指针）」**，**不是 sub 索引** | `ip = *(u32*)(T+0x04)`（T = 执行对象），指向 ECL 文件缓冲内的**当前/下一条待执行指令绝对地址**；`0` = 线程结束。`subIdx` 这一层**在本作不存在**（与 th15/th16 的 `thread+4 = 索引` **不同**）。 |
+| **Q2 sub 表** | ✅ **确认（与 th15/th16 同构）** | `mgr = *(u32*)0x4C2188`；`res = *(u32*)(mgr+0xAC)`；`count = *(i32*)(res+0x08)`；`table = *(u32*)(res+0x8C)`；项 **8B**，`+0` = 名字 `char*`、`+4` = sub 数据基址（**首指令 = `+4 + 0x10`**）。加载器 `FUN_004795B0`（SCPT 魔数 `0x54504353`）。 |
+| **Q3 函数栈** | ✅ **存在可遍历显式子调用栈** | 栈基址 `T+0x08`，栈指针 `SP = *(u32*)(T+0x1008)`（`0` = 空栈）；**帧长 `0x0C`**；帧内 `+0x00`=旧 SP / `+0x04`=时间 / **`+0x08`=调用者指令地址**。压帧 `FUN_00477030`，弹帧 = `ret`(case `0x0A`) @ `0x4772FF`。**栈顶帧存「调用者 ip」而非索引**（因本作无 subIdx）。 |
+| **Q4 主线宿主捕获点** | ✅ **给出捕获点** | `FUN_004183F0` 分配 `0x52E4` 并构造宿主，**返回 `EAX` = 宿主 H**；「spawn main」两站点：`call 0x4183F0` @ **`0x42C766`** 与 @ **`0x42C905`**（下一条 `0x42C76B` / `0x42C90A` 可挂 5B EHOOK），命名参数 `"main"` @ `0x4AADE0`。① 静态兜底：宿主链表 `*(u32*)(mgr+0xB0)` → 节点 `H+0x14CC`，**`H = *(u32*)(*(u32*)(mgr+0xB0))`**。 |
+| **Q5 解释器命中点** | ✅ **确认** | **`0x4772D2`**（`8B 43 04` + `8A 48 0A`，可挂 6B EHOOK）：`mov eax,[ebx+4]` / `mov cl,[eax+0xa]`；**命中寄存器 `EBX` = 执行对象 T**（脚本上下文）；所在函数 = `FUN_004772A0`（`0x4772A0`/RVA `0x772A0`）= **ECL 主解释器**（每帧逐指令步进），opcode 跳表 `0x478C38` / 字节映射 `0x478D44`。 |
+| **Q6 名字来源** | ✅ **运行期保留名字** | `table[i].+0` 为 `char*`，指向**已加载 ECL 缓冲内的名字串**（加载器 `FUN_004795B0` 在 `0x47965E` 填入）。但因 Q1 是地址而非索引，取「当前 sub 名」需**地址 → sub 反查**（用 `table[i].+4+0x10` 建区间表二分）。 |
+| **Q7 机体 / 子机** | 🟡 **给出现有地址 + 推测** | `CHARA = 0x4BE7B8`（thprac 既有，xref 109 处）；`SHOT/SHOTTYPE ≈ 0x4BE7BC`（**紧邻、xref 48 处，与 th12 的 `CHARA=0x4b0c90 / SUBSHOT=0x4b0c94` 同构 ⇒ 推测，待实测**）；`0x4BE7C4`（xref 91 处）疑为**难度/rank**（`shl dl,cl` 生成 rank 掩码）。 |
+| **Q8 ECLJump** | ✅ **不影响判读** | `ECLJump` 只把 `goto`(`opcode 0x0C`) 写进运行期缓冲；`goto`(case `0x0C` @ `0x47758E`) **只改 `T+0`(时间) 与 `T+4`(ip)**，不触碰 sub 表、不触碰「当前 sub」的任何其他字段。 |
+| **Q9 段落判定口径** | ✅ **走 (A) 调用栈祖先法** | 段落入口 sub 由 `call`(`opcode 0x0B`) 进入并**驻留栈上**至 `ret`；沿 Q3 遍历即得所属段落。**祖先以「调用者指令地址」给出**，需经 Q2 的地址区间表映射回 sub 名。**⚠️ 无 th13 `.ecl`，段落入口白名单需另行离线枚举 / 真机采集。** |
+
+> **关键地址（VA / RVA）**：
+> ECL 主解释器 `FUN_004772A0` = `0x4772A0`/`0x772A0`（体 `0x4772A0`–`0x478BEA`）；
+> 命中点 `0x4772D2`/`0x772D2`；ip 推进 `0x477377`/`0x77377`；
+> `ret`(case `0x0A`) `0x4772FF`/`0x772FF`；`call`(case `0x0B`) `0x477502`/`0x77502`；压帧 `FUN_00477030`/`0x77030`；`goto`(case `0x0C`) `0x47758E`/`0x7758E`；
+> opcode 跳表 `0x478C38`；字节映射 `0x478D44`；>0x5D 委派点 `0x478B9D`；推进/等时 `0x478BBF`；线程结束 `0x478BDB`；
+> 线程驱动器 `FUN_00478DB0`/`0x78DB0`（`0x478DE0: mov [H+4],[H+0x11D0]`）；
+> 宿主构造 `FUN_00418F40`/`0x18F40`；宿主「复位」`FUN_00417740`/`0x17740`（`0x417797: H+4 = H+8`、`0x4177A9: H+0x11D0 = H+8`）；
+> 宿主工厂 `FUN_004183F0`/`0x183F0`；`"main"` @ `0x4AADE0`/`0xAADE0`；spawn 站点 `0x42C766`/`0x2C766`、`0x42C905`/`0x2C905`；
+> SCPT 加载器 `FUN_004795B0`/`0x795B0`；按名查表 `FUN_004797D0`/`0x797D0`；
+> 访问器 `GetSubName` `0x414150`/`0x14150`、`GetResCount` `0x414160`/`0x14160`、`GetRes` `0x414170`/`0x14170`；
+> 实体（线程）构造 `FUN_00479860`/`0x79860`（`malloc(0x11E0)`）；
+> 扩展 opcode（≥0x12C）处理器 `FUN_0041B260`/`0x1B260`，入口蹦床 `0x41B250`/`0x1B250`（`add ecx,0x11EC; jmp`）。
+
+---
+
+## 1. 统一指针链（TH13 定案）
+
+```text
+mgr   = *(u32*)0x4C2188                              // 全局管理器（ECL/脚本管理器）
+res   = *(u32*)(mgr + 0xAC)                          // ECL 资源对象（GetRes @0x414170）
+count = *(i32*)(res + 0x08)                          // sub 总数（GetResCount @0x414160）
+table = *(u32*)(res + 0x8C)                          // sub 表（项 8B）
+name_i  = *(char**)(table + i*8)                     // 项 +0 = 名字 char*
+start_i = *(u32*)(table + i*8 + 4) + 0x10            // 项 +4 = sub 数据基址 ⇒ 首指令 = +4+0x10
+
+// ── 主线宿主（进关时由 0x42C76B / 0x42C90A 抓到 EAX）────────────────────
+H     = 主线 ECL 宿主对象（`0x52E4` 字节）
+H+0x11CC = res                                       // 宿主持有的 ECL 资源（= 上面那个 res）
+T     = *(u32*)(H + 0x11D0)                          // 线程/脚本上下文（≡ *(u32*)(H+4)）
+T+0x000 = float 当前 ECL 时间（跨帧累积）
+T+0x004 = u32  当前（下一条待执行）ECL 指令的绝对地址；0 = 线程结束 ★Q1
+T+0x008 = u32  调用栈基址（帧数组起点）
+T+0x1008 = i32 调用栈指针 SP（字节偏移，0 = 空栈）
+T+0x100C = i32 局部/表达式栈指针（与 0x1008 共用基址 T+8）
+T+0x1014 = u32 ins 处理器对象（= H 自身；opcode > 0x5D 时对它做虚调用）
+T+0x101C = u8  指令选择掩码（难易度位掩码；供 `test byte [T+0x101C], ins[0xA]`）
+
+// ── 宿主自身的其它字段 ────────────────────────────────────────────────
+H+0x000  = vtable（主线宿主 = 0x4AAC14；更早设过一次 0x4AABF8）
+H+0x004  = T（= H+8，见 0x417797 / 0x478DE0）
+H+0x008  = T 本体（内嵌线程）
+H+0x11D0 = T（线程链表头；H+0x11D4 = 后继，0 = 无）
+H+0x11EC = 扩展 opcode 处理器子对象（vtable slot 0/0x1C → `0x41B250: add ecx,0x11EC; jmp 0x41B260`）
+H+0x14CC = 宿主链表节点 { +0 = H, +4 = next, +8 = prev }；链表头/尾 = `*(u32*)(mgr+0xB0)` / `*(u32*)(mgr+0xB4)`
+H+0x52B4 = H（自指针；供 `H+0x11EC` 处读 `[this+0x40C8]` 拿回宿主）
+```
+
+**与 th15/th16 模板的差异（重要，不可照搬）**
+
+| 项 | th15 / th16（C 代） | **th13（本作）** |
+| --- | --- | --- |
+| 宿主 → 线程 | `host+0xC` = thread | **`H+0x11D0`（≡ `H+4`）= T** |
+| 宿主 → res | `host+0x11F8` = res | **`H+0x11CC` = res**（更直接：`res = *(*(0x4C2188)+0xAC)`，**不需要宿主**） |
+| 当前 sub | `thread+4` = **sub 索引**，`thread+8` = ip 偏移 | **`T+4` = 指令绝对地址**（无 subIdx 层） |
+| 调用栈基址 / SP | `thread+0xC` / `thread+0x100C` | **`T+0x08` / `T+0x1008`** |
+| 帧长 / 帧内 | `0x10`，帧内 `+0xC` = 调用者 sub 索引 | **`0x0C`**，帧内 `+0x08` = 调用者**指令地址** |
+| sub 表 | `res+0x8C`，项 8B，`+0`=名字 `+4`=起始 | **完全一致** ✅ |
+
+---
+
+## 2. Q1 —— `[T+4]` 是**指令地址（指针）**，不是 sub 索引
+
+### 2.1 判据
+
+ECL 主解释器 `FUN_004772A0` 的 prologue 与分发头直接把 `EBX` 当脚本上下文，取 `[EBX+4]` 作为**当前指令**再读其 opcode：
+
+```asm
+004772a0  55                push  ebp
+004772a1  8bec              mov   ebp, esp
+004772a3  83e4f8            and   esp, 0xfffffff8
+004772a6  8b4304            mov   eax, dword ptr [ebx + 4]     ; eax = 当前指令地址
+004772a9  81ecb0000000      sub   esp, 0xb0
+004772af  56                push  esi
+004772b0  57                push  edi
+004772b1  85c0              test  eax, eax
+004772b3  0f8429190000      je    0x478be2                      ; ip == 0 → 线程结束
+004772b9  db00              fild  dword ptr [eax]                 ; 指令的「时间」是 int
+004772bb  d903              fld   dword ptr [ebx]               ; T+0 = 当前时间(float)
+004772bd  ded9              fcompp
+004772bf  dfe0              fnstsw ax
+004772c1  f6c401            test  ah, 1
+004772c4  0f85cd000000      jne   0x477397                      ; 时间未到 → 累加时间后返回
+004772ca  befcffffff        mov   esi, 0xfffffffc
+004772cf  8d7e08            lea   edi, [esi + 8]
+004772d2  8b4304            mov   eax, dword ptr [ebx + 4]      ; ★ 分发循环头：重新取当前指令
+004772d5  8a480a            mov   cl, byte ptr [eax + 0xa]      ; 指令 +0xA = 选择掩码字节
+004772d8  848b1c100000      test  byte ptr [ebx + 0x101c], cl
+004772de  0f8493000000      je    0x477377                      ; 掩码不匹配 → 跳过该指令
+004772e4  0fbf4804          movsx ecx, word ptr [eax + 4]       ; opcode（16 位）
+004772e8  83f95d            cmp   ecx, 0x5d
+004772eb  0f87ac180000      ja    0x478b9d                      ; > 0x5D → 委派给 T+0x1014 的虚方法
+004772f1  0fb691448d4700    movzx edx, byte ptr [ecx + 0x478d44]  ; 字节映射表
+004772f8  ff2495388c4700    jmp   dword ptr [edx*4 + 0x478c38]  ; 跳表分发
+```
+
+`[EBX+4]` 被当作**指针**：读 `[ins+0]`（int 时间）、`[ins+4]`（opcode）、`[ins+6]`（size）、`[ins+0xA]`（掩码）——它**绝不可能是索引或偏移**。且**本作不存在「当前 sub 索引」这一层**：全函数对 `[EBX+4]` 的写入只有「绝对地址」一种形态。
+
+> **指令头布局（由上述指令流推出）**：`+0x00` = int 时间 ｜ `+0x04` = u16 opcode ｜ `+0x06` = u16 size ｜ `+0x08` = u16 浮点参数掩码 ｜ `+0x0A` = u8 选择掩码（难易度） ｜ `+0x0C` = u8 局部槽数 ｜ `+0x0D..0x0F` 填充 ｜ **`+0x10` 起 = 参数（dword）**。与 `thprac_th13.cpp:943` 的 `ECLJump` 写出的 6 个 dword 完全吻合（`opcode=0x0C`/`size=0x18`/掩码 `0x02FF0000` ⇒ `ins[0xA]=0xFF` 任意难度 | `ins[0x10]`=dest−start | `ins[0x14]`=at_frame）。
+
+### 2.2 字段写入点（谁写 `T+4`）
+
+| VA / RVA | 语义 | 片段 |
+| --- | --- | --- |
+| `0x41779A` / `0x1779A` | **线程复位**：`T+4` 与 `T+0x11D0` 同指向内嵌线程首地址 | `lea edx,[eax+8]` → `mov [eax+4],edx`（`FUN_00417740`，由宿主构造器 `0x418FA7` 调用） |
+| `0x4191F9` / `0x191F9` | **进关/复位设主线 sub**：`T+4 = FindSubByName("main")` 结果（= 该 sub 首指令） | `mov ecx,[edi+4]` → `mov [ecx+4],eax` |
+| `0x41AC2F` / `0x1AC2F` | **按名切 sub**：`T+4 = FindSubByName(res, name) + 0x10` | `mov edx,[ebx+4]` → `mov [edx+4],eax` |
+| `0x4798D2` / `0x798D2`、`0x479901` / `0x79901`、`0x479921` / `0x79921` | 线程构造函数族里的同型写入 | `mov ecx,[esi+4]` → `mov [ecx+4],eax` |
+| **`0x477380` / `0x77380`** | **逐指令推进**：`T+4 = T+4 + ins.size` | `movzx ecx,word[eax+6]` → `add ecx,eax` → `mov [ebx+4],ecx` |
+| `0x477324` / `0x77324` | **`ret` 恢复调用者 ip** | `mov eax,[eax+ebx+8]` → `mov [ebx+4],eax` |
+| `0x47758E`+`0x47737E` / `0x7758E` | **`goto` 重定位**：`T+4 = ins + ins[+0x10]` | `mov ecx,[eax+0x10]` → `add ecx,eax` → `mov [ebx+4],ecx` |
+| `0x478BDB` / `0x78BDB` | **线程结束**：`T+4 = 0` | `mov dword ptr [ebx+4], 0` |
+
+### 2.3 「地址 → 当前 sub」的取法（因无 subIdx）
+
+```cpp
+// 用 sub 表建「起始地址 → 索引」区间表（一次性 / 每次 res 变化时重建）
+//   start_i = *(u32*)(table + i*8 + 4) + 0x10
+// 按 start_i 升序排序；当前 sub = 满足 start_i <= ip < start_{i+1} 的 i
+// name = *(char**)(table + i*8)
+```
+> ⚠️ 表项按**名字字典序**（`FUN_004797D0` 二分）存放，**地址并不单调** ⇒ 必须显式排序，不能直接对索引二分。
+> ⚠️ 越界/脏指针保护：`ip` 必须落在某 `[start_i, start_{i+1})` 内，否则视为「不在已知 sub」。`ip == 0` → 线程已结束。
+
+### 2.4 与总括 §5.1 矛盾的裁定
+
+总括 §5.1 的遗留矛盾「`[执行对象+4]` 到底是 sub 索引还是指令指针」在本作有明确答案：**th13 是「指令指针」**（该行原先标 th14 为「指令指针」；**th13 应与 th14 同类**）。**th15/th16/17/18 是「索引」**，两者不可互相搬运。
+
+---
+
+## 3. Q2 —— sub 表：`res+0x8C`，项 8B（与 th15/th16 逐字段一致）
+
+### 3.1 三个现成访问器（游戏自己写的，直接证明字段语义）
+
+```asm
+00414150  8b888c000000   mov   ecx, dword ptr [eax + 0x8c]   ; eax = res → table
+00414156  8b04d1         mov   eax, dword ptr [ecx + edx*8]  ; table[idx].+0  → 名字 char*
+00414159  c3             ret                                  ; GetSubName(res, idx)
+00414160  a188214c00     mov   eax, dword ptr [0x4c2188]      ; mgr
+00414165  8b88ac000000   mov   ecx, dword ptr [eax + 0xac]    ; res = mgr+0xAC
+0041416b  8b4108         mov   eax, dword ptr [ecx + 8]       ; res+8 → count
+0041416e  c3             ret                                  ; GetResCount()
+00414170  a188214c00     mov   eax, dword ptr [0x4c2188]      ; mgr
+00414175  8b80ac000000   mov   eax, dword ptr [eax + 0xac]    ; res = mgr+0xAC
+0041417b  c3             ret                                  ; GetRes()
+```
+
+⇒ 三条链一次坐实：`res = *(*(0x4C2188)+0xAC)`、`count = res+8`、`table = res+0x8C`、`table[i].+0 = char* 名字`。
+
+### 3.2 建表 / 加载（写侧）—— `FUN_004795B0`@`0x4795B0`
+
+```asm
+004795b7  8bf1              mov   esi, ecx                       ; esi = res
+004795b9  8b4604            mov   eax, dword ptr [esi + 4]        ; 文件槽号
+004795bf  894c860c          mov   dword ptr [esi + eax*4 + 0xc], ecx  ; res[+0xC+slot*4] = ECL 文件缓冲
+004795ca  813953435054      cmp   dword ptr [ecx], 0x54504353    ; 魔数 "SCPT"
+004795e9  6683790401        cmp   word ptr [ecx + 4], 1          ; 版本 1
+004795f2  0fb74806          movzx ecx, word ptr [eax + 6]        ; 头尺寸
+004795fe  8d7c0124          lea   edi, [ecx + eax + 0x24]        ; 名字区 = buf+0x24+hdr
+00479602  0fb74010          movzx eax, word ptr [eax + 0x10]     ; 本文件 sub 数
+00479606  014608            add   dword ptr [esi + 8], eax        ; res+8 += sub 数  ← count
+0047960c  8d3c87            lea   edi, [edi + eax*4]             ; 名字串区 = 名字区 + n*4
+00479616  8d14c500000000    lea   edx, [eax*8]
+0047961e  e8ca0a0000        call  0x47a0ed                       ; malloc(count*8)
+00479628  89868c000000      mov   dword ptr [esi + 0x8c], eax    ; res+0x8C = 新表  ← table
+...
+00479640  8b4604            mov   eax, dword ptr [esi + 4]
+00479643  8b54860c          mov   edx, dword ptr [esi + eax*4 + 0xc]  ; 缓冲
+00479647  8b4508            mov   eax, dword ptr [ebp + 8]            ; 偏移数组游标
+0047964a  0310              add   edx, dword ptr [eax]                ; 缓冲 + offset[i]
+0047964c  8b868c000000      mov   eax, dword ptr [esi + 0x8c]
+00479652  8954c804          mov   dword ptr [eax + ecx*8 + 4], edx    ; table[i].+4 = 起始
+00479656  8b968c000000      mov   edx, dword ptr [esi + 0x8c]
+0047965c  8bc7              mov   eax, edi
+0047965e  893cca            mov   dword ptr [edx + ecx*8], edi        ; table[i].+0 = 名字 char*（指向缓冲内名字串）
+00479661  8d5801            lea   ebx, [eax + 1]                     ; 扫描到 NUL，推进到下一个名字
+00479664  8a10              mov   dl, byte ptr [eax]
+00479666  40                inc   eax
+00479667  84d2              test  dl, dl
+00479669  75f9              jne   0x479664
+0047966b  83450804          add   dword ptr [ebp + 8], 4             ; 偏移数组 +4
+0047966f  2bc3              sub   eax, ebx
+00479671  41                inc   ecx
+00479672  8d7c0701          lea   edi, [edi + eax + 1]
+00479676  3b4e08            cmp   ecx, dword ptr [esi + 8]
+00479679  7cc5              jl    0x479640
+```
+⇒ `res+0x8C` = 表；项 **8 字节**；`+0` = 名字 `char*`（指向已加载缓冲内的名字串，**运行期保留**）；`+4` = `buffer + offset[i]`（sub 数据基址）；`res+0xC+slot*4` = 文件缓冲数组。
+
+### 3.3 按名查表 —— `FUN_004797D0`@`0x4797D0`（二分）
+
+```asm
+004797d5  8b5808            mov   ebx, dword ptr [eax + 8]       ; count
+004797df  8b808c000000      mov   eax, dword ptr [eax + 0x8c]    ; table
+004797f8  8b14f1            mov   edx, dword ptr [ecx + esi*8]   ; table[mid].+0 = 名字
+00479800  8a01              mov   al, byte ptr [ecx]             ; 逐字节 strcmp(callerName, table[mid].name)
+...
+00479842  8b55fc            mov   edx, dword ptr [ebp - 4]       ; table
+00479845  8b44f204          mov   eax, dword ptr [edx + esi*8 + 4] ; table[idx].+4
+0047984b  83c010            add   eax, 0x10                      ; ★ +0x10 ⇒ 该 sub 的首条指令
+00479852  c20400            ret   4
+```
+⇒ `FindSubByName(res, name) = table[idx].+4 + 0x10`。**`+0x10` 正是 sub 的前导 16 字节**（与 §2.1 指令头 `0x10` 一致）——即每个 sub 的数据以 16 字节前导开头，真正指令从 `+0x10` 起。
+
+### 3.4 `GetMemAddr(0x4c2188, 0xac, 0xC)` 的展开（与 thprac `ECLHelper` 对齐）
+
+`thprac_games.h:653-661`：
+```cpp
+void SetBaseAddr(void* addr) { mPtrToBuffer = addr; VFile::SetFile((uint8_t*)(*(uint32_t*)addr), 0x99999); }
+void SetFile(unsigned int ord) { VFile::SetFile((uint8_t*)(*(uint32_t*)(mPtrToBuffer + ord*4)), 0x99999); }
+```
+⇒ `SetBaseAddr` 收到的指针 `P` 满足 `*(u32*)(P + ord*4)` = 第 ord 个 ECL 文件缓冲。展开 `GetMemAddr(0x4c2188, 0xac, 0xC) = *(u32*)(*(u32*)(0x4c2188)+0xac) + 0xC = res + 0xC` ⇒ **`res+0xC` 正是加载器用的 `res+0xC+ord*4` 数组首址**（§3.2）。**完全吻合**，`THSectionPatch` 的 `SetBaseAddr` 一级对象就是 `res`。
+
+---
+
+## 4. Q3 —— ECL 子调用栈（**存在、可遍历**）
+
+### 4.1 结论
+
+1. **有显式可遍历的子调用栈**，随解释器自动维护，与线程 T 内嵌：
+   - **帧存储基址**：`base = T + 0x08`
+   - **栈指针**：`SP = *(u32*)(T + 0x1008)`（int，**字节**偏移；`0` = 空栈/顶层）
+   - **帧长**：**`0x0C`**（3 个 dword）
+2. **帧内布局**（压帧顺序 = 地址升序）：`+0x00` = 旧 `SP`；`+0x04` = 调用时 `T+0`（时间，float）；**`+0x08` = 调用者当时的指令地址（= 调用者 `T+4`）**。
+3. 「栈顶帧存的是**调用者 ip**」（不是调用者 sub 索引 —— 本作没有 subIdx）。当前指令仍是 `T+4`。
+4. 栈区上限 **`0x1000` 字节**（`SP` 的有效域 `0 .. 0x1000`）⇒ 物理上限 ≈ 341 帧（`0x1000 / 0xC`）。
+5. `SP == 0` 分支会把首帧的「旧 SP」槽规范化（写一个非 0 哨兵，见 `0x47705A`/`0x4771CA`），故遍历终点判据取 **`SP < 0x0C` 或旧 SP 为哨兵/0**。
+
+### 4.2 `ret`（opcode `0x0A`）—— case @ `0x4772FF`/RVA `0x772FF`
+
+```asm
+004772ff  8d4308            lea   eax, [ebx + 8]              ; 栈基址
+00477302  e859270000        call  0x479a60                    ;（清表达式临时值）
+00477307  83bb0810000000    cmp   dword ptr [ebx + 0x1008], 0 ; SP == 0 ?
+0047730e  0f84c7180000      je    0x478bdb                    ;   空 → T+4 = 0（线程结束）
+00477314  01b308100000      add   dword ptr [ebx + 0x1008], esi  ; esi = -4
+0047731a  8b8308100000      mov   eax, dword ptr [ebx + 0x1008]
+00477320  8b441808          mov   eax, dword ptr [eax + ebx + 8] ; 读 frame[+0x08]
+00477324  894304            mov   dword ptr [ebx + 4], eax      ; ★ T+4 = 调用者 ip
+00477327  01b308100000      add   dword ptr [ebx + 0x1008], esi
+0047732d  8b8308100000      mov   eax, dword ptr [ebx + 0x1008]
+00477333  8b4c1808          mov   ecx, dword ptr [eax + ebx + 8] ; 读 frame[+0x04]
+00477337  890b              mov   dword ptr [ebx], ecx          ; ★ T+0 = 调用者时间
+00477339  01b308100000      add   dword ptr [ebx + 0x1008], esi
+0047733f  837b0400          cmp   dword ptr [ebx + 4], 0
+00477343  8b8308100000      mov   eax, dword ptr [ebx + 0x1008]
+00477349  8b7c1808          mov   edi, dword ptr [eax + ebx + 8] ; 读 frame[+0x00]
+0047734d  89bb08100000      mov   dword ptr [ebx + 0x1008], edi  ; ★ SP = 旧 SP
+```
+⇒ 弹栈顺序 `ip → time → 旧SP`，**帧长 0x0C**，与 §4.3 的压栈严格对称。
+
+### 4.3 `call`（opcode `0x0B`）—— case @ `0x477502` → 压帧 `FUN_00477030`@`0x477030`
+
+调用点：
+```asm
+00477502  6a00              push  0
+00477504  53                push  ebx
+00477505  8bf3              mov   esi, ebx
+00477507  c6400c00          mov   byte ptr [eax + 0xc], 0
+0047750b  e820fbffff        call  0x477030                  ; ← 压帧（含参数拷贝）
+00477510  85c0              test  eax, eax
+00477512  0f85ca160000      jne   0x478be2
+00477518  8d70fc            lea   esi, [eax - 4]
+0047751b  8d7804            lea   edi, [eax + 4]
+0047751e  e960feffff        jmp   0x477383                  ; 回到「时间判定」
+```
+压帧体（节选，`edx` = T）：
+```asm
+004771a0  8b4df4            mov   ecx, dword ptr [ebp - 0xc]    ; SP0（进入前的 SP）
+004771a3  8bba08100000      mov   edi, dword ptr [edx + 0x1008]
+004771a9  85c9              test  ecx, ecx
+004771ab  741d              je    0x4771ca                      ; SP0 == 0 → 走规范化分支
+004771ad  838208100000fc    add   dword ptr [edx + 0x1008], -4
+004771b4  8b8208100000      mov   eax, dword ptr [edx + 0x1008]
+004771ba  8b441008          mov   eax, dword ptr [eax + edx + 8]
+004771be  898a08100000      mov   dword ptr [edx + 0x1008], ecx   ; 复位 SP = SP0
+004771c4  89441104          mov   dword ptr [ecx + edx + 4], eax  ; ★ 压 frame[+0x00] = 旧 SP
+004771c8  eb0a              jmp   0x4771d4
+004771ca  c7820810000004000000  mov dword ptr [edx + 0x1008], 4 ; SP0 == 0 的规范化
+004771d4  8b9a08100000      mov   ebx, dword ptr [edx + 0x1008]
+004771da  897c1308          mov   dword ptr [ebx + edx + 8], edi
+004771e3  01ba08100000      add   dword ptr [edx + 0x1008], edi   ; edi = 4
+004771e9  85c9              test  ecx, ecx
+004771eb  7421              je    0x47720e
+004771ed  8b8a08100000      mov   ecx, dword ptr [edx + 0x1008]
+004771f3  8b1e              mov   ebx, dword ptr [esi]           ; T+0 = 时间
+004771f5  895c1108          mov   dword ptr [ecx + edx + 8], ebx  ; ★ 压 frame[+0x04] = 时间
+004771f9  01ba08100000      add   dword ptr [edx + 0x1008], edi
+004771ff  8b8a08100000      mov   ecx, dword ptr [edx + 0x1008]
+00477205  8b5e04            mov   ebx, dword ptr [esi + 4]        ; T+4 = 当前指令
+00477208  895c1108          mov   dword ptr [ecx + edx + 8], ebx  ; ★ 压 frame[+0x08] = 调用者 ip
+0047720c  eb1c              jmp   0x47722a
+```
+⇒ 压栈 `{旧SP, 时间, 调用者ip}`，**帧长 `0x0C`**，与 §4.2 弹栈次序完全对应。
+
+### 4.4 遍历规则（推荐实现）
+
+```cpp
+// T = *(u32*)(H + 0x11D0)（或 *(u32*)(H+4)，两者恒等）
+uint32_t sp = *(uint32_t*)(T + 0x1008);          // 0 = 无 caller
+int n = 0;
+while (sp >= 0x0C && sp < 0x1000 && n < 256) {
+    uint32_t callerIp = *(uint32_t*)(T + 0x08 + sp - 4);   // 帧 +0x08 = 调用者 ip
+    if (!callerIp) break;
+    int callerSub = SubOfAddress(callerIp);               // §2.3 的地址区间表
+    if (callerSub < 0) break;                             // 越界 → 停止
+    ancestors[n++] = NameOf(callerSub);                   // table[callerSub].+0
+    sp = *(uint32_t*)(T + 0x08 + sp - 0x0C);              // 帧 +0x00 = 旧 SP
+}
+// 祖先序：ancestors[0] = 直接调用者 … 最后 = 最外层；当前 sub 由 T+4 另行判定
+```
+
+- **只在指令边界（帧间稳定态，如 IGI 渲染）遍历**：局部/表达式栈共用基址 `T+8`、指针 `T+0x100C`（见 `0x4770BF`、`0x478F14`、`0x478FBA` 的 `[esi+0x100C]`），执行中遍历有误读风险。
+- 保护：`T`、`sp`、`callerIp`、`callerSub` 全部校验。
+
+### 4.5 异步 `spawn` 的例外
+
+`FUN_00478DB0`（§5.3）对宿主按**线程链表 `H+0x11D0 → H+0x11D4`** 逐个跑 VM；`FUN_00479860`（`malloc(0x11E0)`）就是「另起一个线程对象」的构造器。主线的同步 `call` 链只在**主线宿主那一个 T** 上，读 `*(u32*)(H+0x11D0)` 不会混入异步线程。
+
+---
+
+## 5. Q4 —— 主线宿主捕获点
+
+### 5.1 「spawn main」站点
+
+字符串 `"main"` @ **`0x4AADE0`**（RVA `0xAADE0`，全程序仅此一处且仅被下面两处引用）。宿主工厂 `FUN_004183F0`：`malloc(0x52E4)` → `call 0x418F40` 构造 → **两条路径都 `mov eax, ebx` 返回宿主**。
+
+```asm
+; 站点 1（进关）
+0042c74c  6a54              push  0x54
+0042c74e  8d4c2414          lea   ecx, [esp + 0x14]
+0042c752  53                push  ebx
+0042c753  51                push  ecx
+0042c754  e8d76b0500        call  0x483330                  ; memset(参数结构, 0, 0x54)
+0042c75c  8d542410          lea   edx, [esp + 0x10]
+0042c760  52                push  edx
+0042c761  68e0ad4a00        push  0x4aade0                  ; "main"
+0042c766  e885bcfeff        call  0x4183f0                  ; ★ EAX = 主线宿主（下一条 0x42C76B 可挂 EHOOK）
+
+; 站点 2（另一重开/复位路径，同型）
+0042c8fb  8d442410          lea   eax, [esp + 0x10]
+0042c8ff  50                push  eax
+0042c900  68e0ad4a00        push  0x4aade0                  ; "main"
+0042c905  e8e6bafeff        call  0x4183f0                  ; ★ EAX = 主线宿主（下一条 0x42C90A 可挂 EHOOK）
+```
+
+⇒ **Q4 答案**：捕获点 = `0x42C76B` / `0x42C90A`，命中时 **`EAX` = 主线 ECL 宿主 H**。（对应总括里 TH15 的 `0x43BBC8/0x43D48E/0x43D6BE` 角色。）
+
+### 5.2 宿主工厂如何入链表（可作静态兜底）
+
+```asm
+00418632  39bab0000000      cmp   dword ptr [edx + 0xb0], edi    ; edx = mgr, edi = 0
+00418638  7523              jne   0x41865d                      ; 链表非空 → 追加
+0041863a  ff82b8000000      inc   dword ptr [edx + 0xb8]        ; mgr+0xB8 = 计数
+00418640  8d83cc140000      lea   eax, [ebx + 0x14cc]           ; ★ 节点 = H+0x14CC
+00418646  8982b4000000      mov   dword ptr [edx + 0xb4], eax   ; mgr+0xB4 = 尾
+0041864c  8982b0000000      mov   dword ptr [edx + 0xb0], eax   ; mgr+0xB0 = 头
+00418652  8bc3              mov   eax, ebx                      ; ★ 返回宿主
+0041865a  c20800            ret   8
+```
+宿主构造器里 `0x41904C: mov dword ptr [edi + 0x14cc], edi` ⇒ **节点 `+0` = 宿主自身**。
+⇒ **静态兜底（无需钩子）**：`H = *(u32*)( *(u32*)(mgr + 0xB0) )`（链头）或 `*(u32*)( *(u32*)(mgr + 0xB4) )`（链尾）。⚠️ `0x4183F0` 共有 6 个调用点，只有 `0x42C766`/`0x42C905` 传 `"main"`（其余传其它脚本名），故「链头=main」只在 main 最先创建时成立 —— **推荐仍用捕获点**。
+
+### 5.3 宿主 → 线程（`H+4` 与 `H+0x11D0`）
+
+宿主构造器 `FUN_00418F40` 在 `0x418FA7` 调 `FUN_00417740(H)`，该函数把宿主与内嵌线程绑定：
+
+```asm
+00417740  83a0c8110000fe    and   dword ptr [eax + 0x11c8], 0xfffffffe
+00417747  d9ee              fldz
+00417749  33c9              xor   ecx, ecx
+0041774b  d95808            fstp  dword ptr [eax + 8]        ; H+0x08 = 0.0f    ← T+0（时间）
+0041774e  89480c            mov   dword ptr [eax + 0xc], ecx  ; H+0x0C = 0       ← T+4（ip）
+00417751  89801c100000      mov   dword ptr [eax + 0x101c], eax ; T+0x1014 = H（ins 处理器 = 自身）
+00417757  c78018100000ffffffff  mov dword ptr [eax + 0x1018], -1
+...
+00417797  8d5008            lea   edx, [eax + 8]
+0041779a  895004            mov   dword ptr [eax + 4], edx  ; ★ H+4 = H+8
+...
+004177a9  8990d0110000      mov   dword ptr [eax + 0x11d0], edx ; ★ H+0x11D0 = H+8
+004177af  8988d4110000      mov   dword ptr [eax + 0x11d4], ecx ; H+0x11D4 = 0（无后继线程）
+```
+⇒ **`T = H + 0x08`（内嵌）；`H+4 = T`；`H+0x11D0 = T`**（三者指向同一处）。`FUN_00478DB0` 每帧再刷新一次：
+
+```asm
+00478db0  55                push  ebp
+00478db1  8bec              mov   ebp, esp
+00478db3  83e4f8            and   esp, 0xfffffff8
+00478db6  83ec08            sub   esp, 8
+00478db9  53                push  ebx
+00478dba  56                push  esi
+00478dbb  8db7d0110000      lea   esi, [edi + 0x11d0]        ; 线程链表头
+00478dc1  c744240801000000  mov   dword ptr [esp + 8], 1
+00478dc9  85f6              test  esi, esi
+00478dcb  746f              je    0x478e3c
+00478dd0  8b4604            mov   eax, dword ptr [esi + 4]
+00478dd3  d94508            fld   dword ptr [ebp + 8]
+00478dd6  8b1e              mov   ebx, dword ptr [esi]       ; ebx = T
+00478dd8  51                push  ecx
+00478dd9  d91c24            fstp  dword ptr [esp]
+00478ddc  89442410          mov   dword ptr [esp + 0x10], eax
+00478de0  895f04            mov   dword ptr [edi + 4], ebx  ; ★ 刷新 H+4 = T
+00478de3  e8b8e4ffff        call  0x4772a0                   ; ★ 跑一帧 ECL VM
+00478de8  837c240800        cmp   dword ptr [esp + 8], 0
+```
+
+> ⚠️ **实现注意**：宿主构造后到第一帧 `FUN_00478DB0` 之前，`H+4`/`H+0x11D0` 由 `FUN_00417740`（`0x418FA7`）在**构造期间**就已设好；但**建议读取仍放在帧间稳定态**（IGI 渲染），并做非空校验。
+
+---
+
+## 6. Q5 —— 解释器命中点 `0x4772D2` 与寄存器语义
+
+### 6.1 命中点
+
+```asm
+004772d2  8b4304            mov   eax, dword ptr [ebx + 4]     ; ★ EHOOK(6B) 命中：eax = T+4（当前指令）
+004772d5  8a480a            mov   cl, byte ptr [eax + 0xa]      ; 指令选择掩码
+004772d8  848b1c100000      test  byte ptr [ebx + 0x101c], cl
+004772de  0f8493000000      je    0x477377
+```
+- **地址**：`0x4772D2` / RVA `0x772D2`；**覆盖 6 字节**（`8B 43 04` + `8A 48 0A`，正好两条完整指令）⇒ 可挂 6B EHOOK。
+- **命中寄存器**：**`EBX` = 执行对象 T**（脚本上下文）；`T+4` = 当前（下一条待执行）指令地址；`T+0` = 当前时间。
+- **语义**：ECL 主解释器的**逐指令分发循环头**。
+
+### 6.2 所在函数与调用链
+
+- **函数**：`FUN_004772A0`，入口 `0x4772A0`（RVA `0x772A0`），函数体 `0x4772A0`–`0x478BEA`。
+- **opcode 分发**：`0x4772E4` 取 `(i16)[ins+4]`；`> 0x5D` → 走 `0x478B9D`（对 `[T+0x1014]` 的**虚调用**，即扩展指令处理器 `FUN_0041B260`）；`≤ 0x5D` → 经字节映射 `0x478D44` → 跳表 `0x478C38`。
+- 映射核实：**`0x0A`(ret) → `0x4772FF`；`0x0B`(call) → `0x477502`；`0x0C`(goto) → `0x47758E`**（与 th15/th16 的 `0x0A/0x0B/0x0C` 编号一致）。
+- **调用链**：`FUN_00478DB0`（`0x478DB0`，遍历宿主线程链表 `H+0x11D0`，把 `ebx = T` 后 `call FUN_004772A0`）→ 被 `0x419F07`/`0x41A8F8`/`0x41AC3D`/`0x44B454` 调用（关卡/实体更新路径）。
+- **返回值**：`0` = 本帧到此为止（下一条指令时间未到，已把 `[ebp+8]` 的帧增量加到 `T+0`）；`−1` = 脚本结束（`T+4` 置 0）。
+
+### 6.3 作为「每帧稳定触发点」的评价
+
+- `FUN_004772A0` 由 `FUN_00478DB0` **每帧对每个活跃脚本线程调用一次**；`0x4772D2` 在**每次执行/尝试执行一条指令**时命中（包含 `ins_23`/`wait` 的等待重试 —— 等待期每帧都会走到「时间未到」分支，但**不经过** `0x4772D2`）。
+- ⚠️ **局限**：处于「时间未到、纯等待」时，`0x4772A0` 会在 `0x4772C4` 就跳去 `0x477397` 累加时间并返回，**不经过 `0x4772D2`**。因此它**不是无条件每帧**。
+- ⚠️ 它会**对所有脚本对象**命中 ⇒ 必须用 §5.1 捕获的 H 做过滤（`T == *(u32*)(H+0x11D0)`），否则会把敌方/异步线程也算进来。
+- **推荐做法（与 th15 同风格）**：**不挂 VM 钩子**。只在 `0x42C76B`/`0x42C90A` 抓一次 H，然后在 IGI 渲染（帧间稳定态）读 `T = *(u32*)(H+0x11D0)`、`ip = *(u32*)(T+4)`。`0x4772D2` 作为「需要无条件每帧触发」时的备选。
+
+### 6.4 ⚠️ 对 requests §1「切入点」的更正（重要）
+
+requests 建议从 `th13_lock_timer3 0x41D399`（"set boss mode case 512"）/ `lock_timer2 0x41E26C`（"SetNextPattern case 514"）/ `lock_timer1 0x4250EA` 反汇编「解释器」。实测：
+
+- 这三处（以及 `0x4250EA`，其实是**全局计时器对象** `[0x4C2190]` 的字段写）**不在 ECL 主解释器里**，而在 **`FUN_0041B260`@`0x41B260`** 里；
+- `FUN_0041B260` 是**扩展 opcode 处理器**，入口经蹦床 `0x41B250: add ecx,0x11EC; jmp 0x41B260`（vtable slot 0 / 0x1C），`this` = `H+0x11EC`；它用 `opcode - 0x12C` 索引自己的跳表（`cmp edx,0x2BF`，即 opcode 域 `0x12C..0x3EB`，**512/514 落在此域**）：
+  ```asm
+  0041b250  81c1ec110000      add   ecx, 0x11ec
+  0041b256  e905000000        jmp   0x41b260
+  0041b260  55                push  ebp
+  ...
+  0041b2a0  8bf9              mov   edi, ecx                    ; edi = H+0x11EC
+  0041b2a2  8b87c8400000      mov   eax, dword ptr [edi + 0x40c8]  ; = [H+0x52B4] = H（自指针）
+  0041b2a8  8b4804            mov   ecx, dword ptr [eax + 4]    ; T = [H+4]
+  0041b2ab  8b5904            mov   ebx, dword ptr [ecx + 4]    ; 当前指令 = [T+4]   ← 与 §1 完全一致
+  0041b2ae  0fb74b04          movzx ecx, word ptr [ebx + 4]       ; opcode
+  0041b2b5  81c2d4feffff      add   edx, 0xfffffed4             ; opcode - 0x12C
+  0041b2c3  81fabf020000      cmp   edx, 0x2bf
+  0041b2d6  ff249560f74100    jmp   dword ptr [edx*4 + 0x41f760]
+  ```
+  ⇒ 该函数与主解释器读的是**同一个 `T+4`**，**互为交叉印证**。
+- **结论**：requests §1 的「锁时钩子」是**旁证/交叉印证**，不是读「当前 sub」的正确入口；正确入口是 `0x42C76B`/`0x42C90A`（宿主）+ `T+4`（ip）。
+
+---
+
+## 7. Q6 —— 运行期保留 sub 名
+
+✅ **保留**。加载器 `FUN_004795B0` 在 `0x47965E` 把**名字区指针**（已加载 ECL 缓冲内的名字串首址）直接写入 `table[i].+0`（见 §3.2）；`0x479661`–`0x479672` 逐字节扫 NUL 推进到下一个名字。故运行期 `name = *(char**)(table + i*8)` 直接可读，**无需离线名表**。
+
+> ⚠️ **但本作需要一个「地址 → i」的反查**（因为 Q1 是地址而非索引），见 §2.3。反查只需 `table[i].+4 + 0x10`，**不需要离线 `.ecl`**；离线 `.ecl` 只用于「段落入口白名单」本身。
+
+---
+
+## 8. Q7 —— 机体 / 子机 / 难度地址
+
+| 名称 | VA / RVA | 说明 | 置信度 |
+| --- | --- | --- | --- |
+| `CHARA` | `0x4BE7B8` / `0xBE7B8` | thprac 既有（`thprac_th13.cpp:17`），全程序 109 处引用，例如 `thprac_th13.cpp:2149` 用它区分角色 | ✅ 地址有效（语义待真机） |
+| `SHOT/SHOTTYPE` | `0x4BE7BC` / `0xBE7BBC` | **推测**：紧邻 `CHARA` 的下一个全局 dword，xref 48 处（集中出现在 `0x40A080`/`0x40A2C0`/`0x41315C`/`0x4132F0`/`0x413B2C`/`0x4144FE` 等**与 `CHARA` 相邻引用**的位置），形态与 th12 的 `CHARA=0x4b0c90 / SUBSHOT=0x4b0c94` 同构 | 🟡 待实测 |
+| 难度/rank | `0x4BE7C4` / `0xBE7C4` | 91 处引用；`0x41847E` 处 `mov ecx,[0x4be7c4]` 后 `shl dl,cl` 生成位掩码 ⇒ 疑为难度/rank（也用于 `T+0x101C` 的选择掩码） | 🟡 待实测 |
+| `MODEFLAGS` | `0x4BE830` / `0xBE830` | thprac 既有（90 处引用） | ✅ |
+| `STAGE_NUM` | `0x4BE81C` / `0xBE81C` | thprac 既有（63 处引用） | ✅ |
+| `PLAYER_PTR` | `0x4C22C4` / `0xC22C4` | thprac 既有 | ✅ |
+| `REPLAY_MGR_PTR` | `0x4C22C8` / `0xC22C8` | thprac 既有 | ✅ |
+| `PauseInf` | `0x4C2194` / `0xC2194` | 见 `th13_re_disasm_report.md` §1 | ✅ |
+
+> 说明：本迭代 IGI 只需显示「当前段落」，Q7 非必需；上表供后续日志迭代。`0x4BE7BC` / `0x4BE7C4` **未经真机取值核对，勿直接用于判据**。
+
+---
+
+## 9. Q8 —— 练习 `ECLJump` 对读取的影响
+
+### 9.1 结论
+
+✅ **不影响 sub 判读**（与 th15 §2 / th16 §Q8 一致）。
+
+### 9.2 依据
+
+1. **补丁写入**（`thprac_th13.cpp:936-944`）：
+   ```cpp
+   ecl << ecl_time << 0x0018000C << 0x02ff0000 << 0x00000000 << dest - start << at_frame;
+   ```
+   6 个 dword = 24B（`size = 0x18`）：`+0`=`ecl_time`(int)、`+4`=`0x0018000C`（低 16 位 `0x000C` = **`goto`**，高 16 位 `0x0018` = size）、`+8`=`0x02FF0000`（`ins[0xA]=0xFF` = 任意难度；`ins[8..9]=0` = 无浮点参数）、`+0xC`=0（局部槽数 0）、`+0x10`=`dest-start`、`+0x14`=`at_frame`。
+2. **`goto` 语义**（case `0x0C` @ `0x47758E`/RVA `0x7758E`）：
+   ```asm
+   0047758e  8b4304            mov   eax, dword ptr [ebx + 4]       ; 当前指令
+   00477591  db4014            fild  dword ptr [eax + 0x14]         ; ins[+0x14] = at_frame（int）
+   00477594  d91b              fstp  dword ptr [ebx]                ; ★ T+0 = at_frame（时间，绝对赋值）
+   00477596  8b4810            mov   ecx, dword ptr [eax + 0x10]    ; ins[+0x10] = dest-start
+   00477599  e9e0fdffff        jmp   0x47737e                        ; ★ → add ecx,eax; mov [ebx+4],ecx
+   ```
+   **只改 `T+0`（时间）与 `T+4`（ip），从不触碰 sub 表，也不触碰任何「当前 sub」的旁路字段。**
+3. **sub 结构未动**：`ECLHelper::SetBaseAddr` 定位的是 `res+0xC` 起的**运行期 ECL 文件缓冲**（§3.4）；`ECLJump` 只在硬编码偏移处覆写指令体，不触碰 SCPT 头、名字区、`res+0x8C` 表（表由 `FUN_004795B0` 一次解析生成）。
+4. **瞬态注意**：`goto` 之后、目标 `call` 尚未执行的那一瞬，`T+4` 指向「跳转后位置」（仍是**旧 sub 内**的地址）；`call` 执行后即变到目标段落入口。采样落在帧间稳定态即可规避。
+
+---
+
+## 10. Q9 —— 段落判定口径：**(A) 调用栈祖先法**
+
+### 10.1 结论
+
+✅ **走 (A)**。th13 有**显式可遍历的同步子调用栈**（§4），段落入口由 `call`(`opcode 0x0B`) 进入、**整个段落期间驻留栈上**，`ret` 才弹出；沿栈上溯（帧 `+0x08` = 调用者 ip → 经 §2.3 映射回 sub）即得最近的白名单祖先。
+
+### 10.2 依据
+
+- **栈存在且可遍历**（§4）：满足 (A) 的前提条件（(B) 仅在「无栈」时才必需）。
+- **入口是驻留调用帧**：`call` 压帧（§4.3）与 `ret` 弹帧（§4.2）对称，段落入口是**驻留帧**而非「只经过的点」。
+- **同代/同模板**：th15（C 代模板）已定 (A)；th13 的 `call`/`ret` 机制与 th15/th16 **同型**（仅基址/帧长/帧内字段因无 subIdx 而不同）。
+- **脚本结构旁证**（`thprac_th13.cpp:955-967`、`1784-1798` 的 `THStageWarp`）：th13 的关卡段落到 `ECLJump` 目标用的是**同一套硬编码偏移**（如 st1 的 `0x8a70 → 0x8c30/0x8c94`、st7 的 `0x4b98 → 0x4ef0`），与 th15 的「`dest` 精确命中一条 `call`」形态一致 ⇒ **分支关（本作未点名，但 st4 等含路线）天然兼容**（读的是运行期状态，非静态时间轴）。
+- ⚠️ **本作没有 th15 的 `main → MainFront → MainSubNN` 这种已实测的命名证据**（无 `.ecl`），故「段落入口驻留栈上」是**由机制 + 同代同构推断**，非逐脚本实测。
+
+### 10.3 推荐判定流程
+
+```cpp
+H = mEclHost;                                    // 0x42C76B / 0x42C90A 捕获
+if (!H) return "main";
+T = *(u32*)(H + 0x11D0);
+if (!T) return "main";
+res = *(u32*)(H + 0x11CC);                       // ≡ *(u32*)(*(u32*)0x4C2188 + 0xAC)
+count = *(i32*)(res + 8);
+table = *(u32*)(res + 0x8C);
+uint32_t ip = *(u32*)(T + 4);                    // ① 当前指令地址
+const char* cur = NameOfAddress(table, count, ip);
+const char* section = Whitelist(game, stage, cur);
+if (!section) {                                  // ② 沿调用栈上溯（§4.4）
+    uint32_t sp = *(u32*)(T + 0x1008);
+    while (sp >= 0x0C && sp < 0x1000) {
+        uint32_t callerIp = *(u32*)(T + 0x08 + sp - 4);   // 帧 +0x08
+        if (!callerIp) break;
+        const char* n = NameOfAddress(table, count, callerIp);
+        section = Whitelist(game, stage, n);
+        if (section) break;                               // ③ 最近白名单祖先
+        sp = *(u32*)(T + 0x08 + sp - 0x0C);               // 帧 +0x00 = 旧 SP
+    }
+}
+if (!section) section = "main";                  // ④ 兜底
+```
+
+> 白名单粒度 = 段落入口 sub（与 th15 的 `MainSubNN` 同级）；容器/异步子线程不建条目，命不中即回退。
+
+### 10.4 ⚠️ 未定论项（因无 th13 `.ecl`）
+
+- th13 **没有离线 `.ecl`**，无法静态枚举各关的段落入口名单，也无法给出与 `THStageWarp` 偏移一一对应的入口表。
+- **替代方案（可立即使用）**：`THStageWarp` / `THPatch` 里已有一批**硬编码的段落入口文件偏移**（`thprac_th13.cpp:948-1804`），它们是离线手工解码得到的**指令地址**；运行期把 `T+4` 换算成「相对文件缓冲的偏移」，即可直接把「当前偏移」与这些常量比对 ⇒ 可作为**白名单的初始实现**（需把文件槽位一并考虑，见 §3.4）。
+- 「段落入口 sub 在整段期间驻留栈上」**待真机确认**。
+
+---
+
+## 11. 对总括 §5 与 `th13_ecl_re_requests` 的回填建议
+
+> 本报告**未修改**任何既有文件（避免与并行任务写冲突）。建议由本迭代的收口任务按下列内容回填。
+
+### 11.1 总括 `docs/logger/logger_re_disasm_overview.md` §5.1 的 th13 行
+
+| 列 | 建议填入 |
+| --- | --- |
+| 已有 ECL 解释器命中点（寄存器） | `0x4772D2`（6B，`EBX` = 执行对象 T）；函数 `FUN_004772A0` |
+| 命中点已知字段 | `*(u32*)(T+4)` = **当前指令地址**（**不是索引**）；`*(f32*)(T+0)` = 当前 ECL 时间 |
+| ECL 数据区链 | `GetMemAddr(0x4C2188, 0xAC, 0xC)` = `res + 0xC`（`res = *(*(0x4C2188)+0xAC)`）——**原值正确，可直接用** |
+| sub 名/索引线索 | ✅ `res+0x8C` 表（项 8B，`+0`=名字 `char*`，`+4`=起始，首指令 `+4+0x10`）；`count = res+8` |
+
+并新增两行注释：
+- **`[执行对象+4]` 语义矛盾**（总括 §5.1 注记 / §9 风险 4）应改为：**th13 = 指令指针（与 th14 同类）；th15/16/17/18 = 索引**。两者不可互搬。
+- th13 的**宿主→线程→ip** 链与 th15 不同（`H+0x11D0` / `T+4`），**不得套用 C 代偏移**。
+
+### 11.2 总括 §5.2 接线锚点表 th13 行
+
+保持现值即可（`th13_life_dec 0x444A75`(10B) / `th13_bomb_dec 0x40A404`(5B) / `th13_game_start 0x42D3D7`(7B) 均未复核，本轮未触及）。**新增建议**：把「主线宿主捕获」补进 §5.2 或新增一列 —— `th13` 捕获点 `0x42C76B` / `0x42C90A`（`EAX` = 宿主）。
+
+### 11.3 `docs/th13/th13_ecl_re_requests.md`
+
+| 章节 | 建议 |
+| --- | --- |
+| §1 表格「ECL 解释器锁时钩子（可用切入）」 | **改为「旁证」**：这三处位于扩展 opcode 处理器 `FUN_0041B260`（opcode 域 `0x12C..0x3EB`），**不是**读「当前 sub」的入口；但它们读的 `[T+4]` 与主解释器同源，可作交叉印证。 |
+| §1 表格新增行 | 「ECL 主解释器命中点 = `0x4772D2`(6B) `EBX`」；「主线宿主捕获 = `0x42C76B`/`0x42C90A` `EAX`」 |
+| §2 Q1 | 答：**指令指针**（非索引），`ip = *(u32*)(T+4)`；写入点见本报告 §2.2。 |
+| §3 Q2 | 答：`res = *(*(0x4C2188)+0xAC)`；`table = res+0x8C`；项 8B；`+0`=名字、`+4`=起始、首指令 `+4+0x10`；加载器 `0x4795B0`，查表 `0x4797D0`，访问器 `0x414150`/`0x414160`/`0x414170`。 |
+| §4 Q3 | 答：**有**显式栈；基址 `T+8`，SP `T+0x1008`，帧长 `0x0C`，帧 `+0x08` = 调用者 ip。 |
+| §5 Q4 | 答：`FUN_004183F0` 返回宿主；站点 `0x42C76B`/`0x42C90A`（`"main"`@`0x4AADE0`）；静态兜底 `*(u32*)(*(u32*)(mgr+0xB0))`。 |
+| §6 Q5 | 答：`0x4772D2`（6B EHOOK），`EBX` = 执行对象；函数 `FUN_004772A0`；跳表 `0x478C38`/映射 `0x478D44`。 |
+| §7 Q6 | 答：**运行期保留名字**；但因是地址语义，需 `table[i].+4+0x10` 建区间表反查。 |
+| §8 Q7 | 答：`CHARA=0x4BE7B8`；`SHOT≈0x4BE7BC`（推测，待实测）；难度 `0x4BE7C4`（推测）。 |
+| §9 Q8/Q9 | 答：Q8 不影响；**Q9 = (A) 调用栈祖先法**。 |
+| §10 真机验证清单 | 追加本报告 §13 的条目。 |
+
+---
+
+## 12. 推荐实现摘要（供接线）
+
+```cpp
+// ── 初始化：捕获主线宿主 ─────────────────────────────────────────────
+EHOOK_DY(th13_ecl_host, 0x42C76B, 5, { mEclHost = pCtx->Eax; self->Disable(); });
+EHOOK_DY(th13_ecl_host2, 0x42C90A, 5, { mEclHost = pCtx->Eax; self->Disable(); });
+// 清理：th13_game_start(0x42D3D7) 里 mEclHost = nullptr;（沿用既有 EHOOK）
+
+// ── 每帧（IGI 渲染时，帧间稳定态）读取「当前段落」────────────────────
+if (!mEclHost) { section = "main"; }
+else {
+    auto mgr   = *(uint32_t*)0x4C2188;              // 兜底/完整性校验用
+    auto res   = *(uint32_t*)(mEclHost + 0x11CC);   // ≡ *(uint32_t*)(mgr + 0xAC)
+    auto count = *(int32_t*)(res + 8);
+    auto table = *(uint32_t*)(res + 0x8C);
+    auto T     = *(uint32_t*)(mEclHost + 0x11D0);   // ≡ *(uint32_t*)(mEclHost + 4)
+    if (!res || !table || count <= 0 || !T) { section = "main"; }
+    else {
+        uint32_t ip = *(uint32_t*)(T + 4);          // 当前指令绝对地址；0 = 线程已结束
+        // ① ip → sub（§2.3 区间表）② 白名单 ③ 上溯（§4.4）④ 兜底 "main"
+    }
+}
+```
+
+**EHOOK 覆盖长度**：`0x42C76B` / `0x42C90A` 处下一条指令 = `call 0x425170`（5B，`E8 xx xx xx xx`）⇒ **5B EHOOK** 合适。
+
+---
+
+## 13. 真机验证清单
+
+> 本机无法运行 th13，以下**全部未做**；状态一律为「静态定案（🟡 已定案、未真机三态）」。
+
+- [ ] **宿主捕获**：在 `0x42C76B`/`0x42C90A` 抓 `EAX` 非空；进关后 `H+0x11D0`、`H+0x11CC` 均可解引用且 `H+0x11CC == *(u32*)(mgr+0xAC)`。
+- [ ] **Q1 地址语义**：道中/boss/不同段落各采样一次，`NameOfAddress(T+4)` 与画面进度一致；`T+4 == 0` 只在线程结束（过关/退关）时出现。
+- [ ] **地址→sub 反查**：同一段落内 `T+4` 应始终落在**同一个** `[start_i, start_{i+1})` 区间内；跨段落时切换。
+- [ ] **函数栈上溯**：取一个非白名单子 sub，确认上溯命中最近段落入口；`SP == 0` 时按 `main` 兜底。
+- [ ] **Q7 待实测**：`0x4BE7B8`（机体）、`0x4BE7BC`（子机，**推测**）、`0x4BE7C4`（难度，**推测**）取值与所选机体/子机/难度一致。
+- [ ] **练习跳章**：跳章后 `T+4` 名字与上溯结果均正确（Q8 复核）；`ins[0xA]=0xFF` 的难度掩码在 E/N/H/L 四难度下均能执行（否则 `goto` 会被 `test byte [T+0x101C], cl` 跳过 —— **这是最需要真机确认的一条**）。
+- [ ] **异步关**：含 `spawn` 的段落，主线宿主 T 的读数是否稳定（不被 `H+0x11D4` 链上的异步线程污染）。
+- [ ] **采样时机**：置于帧间稳定态（IGI 渲染），避免局部/表达式栈占用 `T+0x100C` 时误读栈。
+- [ ] **分支关**：th13 若有路线分支关卡，各分支各走一遍，读取与白名单映射均正确。
+- [ ] **变体**：Steam / 汉化版是否共用同一 RVA（本报告地址来自原版 `ts=1313589413`）。
+
+---
+
+## 14. 变更记录
+
+| 日期 | 变更 |
+| --- | --- |
+| 2026-10-14 | 建档（本报告）。静态定案 Q1–Q9：**Q1** `[T+4]` = **当前指令绝对地址（不是 sub 索引）**，写入点 `0x41779A`/`0x4191F9`/`0x41AC2F`/`0x477380`/`0x477324`/`0x47758E`/`0x478BDB`；**Q2** `mgr=*(u32*)0x4C2188` → `res=*(mgr+0xAC)` → `count=res+8` → `table=res+0x8C`（项 8B，`+0`=名字 `char*`，`+4`=数据基址，首指令 `+4+0x10`），访问器 `0x414150`/`0x414160`/`0x414170`，加载器 `FUN_004795B0`（SCPT `0x54504353`），查表 `FUN_004797D0`；**Q3** 显式调用栈（基址 `T+8`、SP `T+0x1008`、帧长 `0x0C`、帧 `+0x08`=调用者 ip，压帧 `FUN_00477030`，弹帧 `ret`@`0x4772FF`）；**Q4** 宿主工厂 `FUN_004183F0`（`mem 0x52E4`，返回 `EAX`=宿主），站点 `0x42C76B`/`0x42C90A`（`"main"`@`0x4AADE0`），宿主线程链 `H+0x11D0`↔`H+4`（`FUN_00417740`/`FUN_00478DB0`），静态兜底 `*(u32*)(*(u32*)(mgr+0xB0))`；**Q5** 命中点 `0x4772D2`（6B，`EBX`=执行对象 T），函数 `FUN_004772A0`（`0x4772A0`–`0x478BEA`），跳表 `0x478C38`/映射 `0x478D44`，>0x5D 委派 `0x478B9D`；**Q6** 运行期保留名字（需地址区间反查）；**Q7** `CHARA=0x4BE7B8`，`SHOT≈0x4BE7BC`（推测），难度 `0x4BE7C4`（推测）；**Q8** `ECLJump` 只写 `goto`(`0x0C`)，只改 `T+0`/`T+4`；**Q9** 定案 **(A) 调用栈祖先法**。**更正 requests §1**：`0x41D399`/`0x41E26C`/`0x4250EA` 位于扩展 opcode 处理器 `FUN_0041B260`（经蹦床 `0x41B250`，`opcode-0x12C` 域），**不是**主解释器，仅作交叉印证。证据：`capstone` 只读反汇编（自写 `D:\workshop\reasm\th13\dl.py`）+ 全程序字节/交叉引用扫描。**未真机三态；无 th13 `.ecl`，段落入口白名单待补。** |
