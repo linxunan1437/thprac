@@ -196,6 +196,9 @@
     <ClInclude Include="src\thprac\thprac_th15_abtest.h">
       <Filter>THPrac Games</Filter>
     </ClInclude>
+    <ClInclude Include="src\thprac\thprac_th16_logger.h">
+      <Filter>THPrac Games</Filter>
+    </ClInclude>
     <ClInclude Include="src\thprac\thprac_launcher_tools_waifus.h">
       <Filter>THPrac Launcher</Filter>
     </ClInclude>
@@ -289,6 +292,12 @@
       <Filter>THPrac Games</Filter>
     </ClCompile>
     <ClCompile Include="src\thprac\thprac_th16.cpp">
+      <Filter>THPrac Games</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thprac\thprac_th16_logger.cpp">
+      <Filter>THPrac Games</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thprac\thprac_th16_checkpoints_gen.cpp">
       <Filter>THPrac Games</Filter>
     </ClCompile>
     <ClCompile Include="src\thprac\thprac_th128.cpp">

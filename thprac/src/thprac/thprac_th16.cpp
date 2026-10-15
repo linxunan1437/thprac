@@ -1,5 +1,6 @@
 ﻿#include "thprac_games.h"
 #include "thprac_utils.h"
+#include "thprac_th16_logger.h"
 #include <format>
 
 
@@ -609,6 +610,10 @@ namespace TH16 {
             ImGui::Text(S(THPRAC_INGAMEINFO_BOMB_COUNT));
             ImGui::NextColumn();
             ImGui::Text("%8d", mBombCount);
+            ImGui::NextColumn();
+            ImGui::Text("当前段落");
+            ImGui::NextColumn();
+            ImGui::Text("%s", TH16Logger::singleton().CurrentSection());
             ImGui::NextColumn();
             ImGui::Text(S(THPRAC_INGAMEINFO_16_RELEASE_COUNT));
             ImGui::NextColumn();
@@ -2710,6 +2715,7 @@ namespace TH16 {
         THGuiRep::singleton().Update();
         THOverlay::singleton().Update();
         THGuiSP::singleton().Update();
+        TH16Logger::singleton().Update();
         TH16InGameInfo::singleton().Update();
 
         auto p = ImGui::GetOverlayDrawList();
@@ -2747,6 +2753,7 @@ namespace TH16 {
         TH16InGameInfo::singleton().mBombCount = 0;
         TH16InGameInfo::singleton().mMissCount = 0;
         TH16InGameInfo::singleton().mReleaseCount = 0;
+        TH16Logger::singleton().OnStageStart();
     })
     EHOOK_DY(th16_bomb_dec, 0x40DB9C,5, // bomb dec
     {
@@ -2795,6 +2802,7 @@ namespace TH16 {
         THOverlay::singleton();
         THGuiSP::singleton();
         TH16InGameInfo::singleton();
+        TH16Logger::singleton();
 
         // Hooks
         EnableAllHooks(THMainHook);
