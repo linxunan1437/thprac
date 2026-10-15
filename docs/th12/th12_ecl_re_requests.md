@@ -3,6 +3,7 @@
 > 总括方案：`docs/logger/logger_re_disasm_overview.md`。
 > 需求来源：`docs/req_logger.md`（本迭代＝**仅监控**）。
 > 二进制：`../exes/th12.exe`，737280 字节，PE `TimeDateStamp = 1251344348`，`ImageBase = 0x400000`，`RELOCS_STRIPPED`（`RVA = VA − 0x400000`）。
+> ECL / decl 素材：`../exes/ecl/th12/`（原始 `.ecl` 9 份）、`../exes/ecl_dump/th12/`（`thecl -d` 反编译 `.decl` 9 份）。清单与来源见 `docs/logger/decompile_materials.md`。
 > 引擎代：**B 代（第二代引擎）**；同代参照：th10 / th11。
 > thprac 现有支持：`thprac/src/thprac/thprac_th12.cpp`。
 > ⚠️ 本作在 thprac 中**没有任何 ECL 解释器 hook**（无“freeze ECL sub time”类钩子），Q1–Q5 **全部待逆向**。

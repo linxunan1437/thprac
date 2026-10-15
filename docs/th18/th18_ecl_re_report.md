@@ -8,7 +8,8 @@
 > 引擎代：**C 代（第四代引擎）**；与 th15/16/17 **同源同形**（指令级基本重合，仅偏移/尺寸不同）。
 > 方法：`pefile 2024.8.26` + `capstone 5.0.7` **只读静态反汇编**（脚本 `../../reasm/th18/reth.py`，本机无 IDA/Ghidra/radare2）；
 > 按 `RELOCS_STRIPPED` 用「4 字节小端 VA 立即数」做字节搜索定位 xref；并与 th15/16/17 逐字段对照。
-> **本机无法运行 th18，也无 th18 离线 `.ecl`** ⇒ 状态：**静态定案（🟡 已定案、未真机三态）**，全部结论均有「地址 + 反汇编片段」支撑。
+> ECL / decl 素材：`../exes/ecl/th18/`（原始 `.ecl` 22 份）、`../exes/ecl_dump/th18/`（`thecl -d` 反编译 `.decl` 22 份；本作无 eclmap，指令呈 `ins_*` 形态），清单与来源见 `docs/logger/decompile_materials.md`。
+> **本机无法运行 th18**；`.decl` 素材已在机，可离线枚举段落入口 ⇒ 状态：**静态定案（🟡 已定案、未真机三态）**，全部结论均有「地址 + 反汇编片段」支撑。
 > 地址口径：正文以 **VA** 为主，关键处附 **RVA = VA − 0x400000**。
 > 只读：本文为新建文件，**未改动任何既有文件**（对既有文档的回填写成 §12「回填建议」）。
 
@@ -26,7 +27,7 @@
 | **Q6 名字来源** | ✅ **运行期保留** | 表项 `+0` 为 `char*`，指向**已加载 ECL 缓冲内的名字串**（加载器 `0x48DA71` 填入）；`name = *(char**)(table+idx*8)` 直接可读；按名查表 `0x48D920` 对 `table[mid].+0` 逐字节 `strcmp` 自证。 |
 | **Q7 机体/子机** | 🟡 **部分** | 定位到**角色名指针表 `0x4B41E0`**（`Reimu / Marisa / Sakuya / Sanae`，共 4 角色）与其**每角色函数表** `0x4B41F4`/`0x4B41F8`/`0x4B41FC`（`0x45F9D0` / `0x460320` / `0x4609C0`）；**未定位**“关卡内当前 character / shotType 全局 dword”（thprac_th18.cpp 无既有常量，需真机或进一步逆向，见 Q7）。 |
 | **Q8 ECLJump** | ✅ **不影响 sub 索引/名字** | `ECLJump` 只写一条 `goto`(`opcode 0x0C`)；`goto`(`0x48B700`) 只改 `thread+0`(time) 与 `thread+8`(ip)，**从不改 `thread+4`**，不动 sub 表。 |
-| **Q9 段落判定口径** | ✅ **走 (A) 调用栈祖先法** | 段落入口 `MainSubNN` 由 `call`(`0x0B`) 进入并**驻留栈上**至 `ret`；沿 §Q3 遍历帧 `+0x0C` 即得最近白名单祖先；根哨兵 `−1` → 兜底 `main`。**⚠️ 无 th18 离线 `.ecl`，段落入口白名单需另行离线枚举/真机采集。** |
+| **Q9 段落判定口径** | ✅ **走 (A) 调用栈祖先法** | 段落入口 `MainSubNN` 由 `call`(`0x0B`) 进入并**驻留栈上**至 `ret`；沿 §Q3 遍历帧 `+0x0C` 即得最近白名单祖先；根哨兵 `−1` → 兜底 `main`。**⚠️ 段落入口白名单尚未枚举（`../exes/ecl_dump/th18/` 素材已在机，可离线枚举）。** |
 
 > **关键地址（VA / RVA）**
 > 解释器 `FUN_0048B3A0` = `0x48B3A0` / `0x8B3A0`；命中点 `0x48C822` / `0x8C822`（原始字节 `f3 0f 11 0f`）；
@@ -669,7 +670,7 @@ void ECLJump(ECLHelper& ecl, unsigned int start, unsigned int dest, int at_frame
 - **唯一瞬态**：`goto` 之后、目标 `call` 尚未执行的那一瞬（同一指令流、极短），`thread+4` 仍是跳转前所在 sub（通常 `main`）；`call` 执行后即正确。采样落在帧间稳定态即可规避。
 
 > **本作 `THStageWarp` 的离线锚点资产**（`thprac_th18.cpp:2419-2460`，供 Q9 白名单兜底）：
-> `st1PostMaple=0xA750`、`st2PostMaple=0x90B4`、`st3PostMaple=0x83A0`、`st4PostMaple=0x5A04`、`st5PostMaple=0x96EC`、`st6PostMaple=0x7E70`、`st7PostMaple=0xA8FC`；ST1 落点示例 `0x6FC8→0x7088 / 0x70BC`、`0xAB90`、`0xAC2C`、`0x7184→0x71F4`。**无 th18 `.ecl`，本机无法把这些偏移解码为 sub 名**（需离线解码或真机采集）。
+> `st1PostMaple=0xA750`、`st2PostMaple=0x90B4`、`st3PostMaple=0x83A0`、`st4PostMaple=0x5A04`、`st5PostMaple=0x96EC`、`st6PostMaple=0x7E70`、`st7PostMaple=0xA8FC`；ST1 落点示例 `0x6FC8→0x7088 / 0x70BC`、`0xAB90`、`0xAC2C`、`0x7184→0x71F4`。**本机无法把这些偏移运行期解码为 sub 名**（`../exes/ecl_dump/th18/` 素材已在机，可**离线**按文件偏移解码为 sub 名，见 `docs/logger/decompile_materials.md`；运行期仍待真机采集）。
 
 ---
 
@@ -719,9 +720,9 @@ if (!section) section = "main";                          // ④ 兜底
 
 > 白名单粒度 = `MainSubNN`；容器 `main`/`MainFront`/`MainLatter` 与异步 `spawn` 子脚本不建条目，命不中即回退。
 
-### 10.5 ⚠️ 未定论项（因无 th18 `.ecl`）
+### 10.5 ⚠️ 未定论项（段落入口白名单待枚举）
 
-- th18 **没有离线 `.ecl`**，故无法静态枚举各关的段落入口 `MainSubNN` 名单，也无法给出与 `THStageWarp` 偏移（§9.4）一一对应的入口表。**白名单需另行离线解码或真机采集**（可用现有 `mainLatterIDs` 的 99/97/91/113 作为首批已知点交叉验证）。
+- th18 的段落入口 `MainSubNN` 名单与 `THStageWarp` 偏移（§9.4）一一对应的入口表**尚未枚举**（`../exes/ecl_dump/th18/` 的 `.decl` 素材已在机，可离线枚举；本作无 eclmap，指令为 `ins_*`，不影响 sub 名）（可用现有 `mainLatterIDs` 的 99/97/91/113 作为首批已知点交叉验证）。
 - “段落入口 sub 在整段期间驻留栈上”是**由 th15 同构 + th18 机制确认推断**，th18 自身脚本结构**未逐脚本实测**（静态、待真机）。
 - 本作**非分支关**（总括 §4 点名的分支关为 th11 st4 / th14 st4 / th16 st5），但 (A) 读的是**运行期状态**，分支关亦天然兼容，无需特判。
 
@@ -765,9 +766,9 @@ if (!section) section = "main";                          // ④ 兜底
 
 ## 13. 未定论 / 风险
 
-1. **段落入口白名单**（决定显示内容，非决定口径）：th18 **无离线 `.ecl`**，本机不能运行 ⇒ `MainSubNN` 名单与 `THStageWarp` 偏移↔名字映射**未建立**。需离线解码或真机采集。
+1. **段落入口白名单**（决定显示内容，非决定口径）：th18 `MainSubNN` 名单与 `THStageWarp` 偏移↔名字映射**尚未建立**；`../exes/ecl_dump/th18/` 的 `.decl` 素材已在机，可**离线**枚举（本机仍不能运行，运行期采集待真机）。
 2. **`Edi` 是否主线**（§5.4）：`0x48C822` 对任意 thread 命中。现有实现靠 `subID==mainLatterIDs[stage]` + `bossExists` 间接规避；若要更稳，建议改读 `mainHost+0x10`（根线程）。
-3. **`res+0xC` 的双重身份**：加载器把 `res+0xC+idx*4` 当“ECL 文件缓冲指针数组”，而 `GetMemAddr(0x4cf2d0,0x188,0xc)`（= `res+0xC`）又是 `ECLJump` 的写入基址。二者因 ECL 数据自 `res+0xC` 起连续布局而自洽（本机无 `.ecl`/无法运行，未实证）。**不影响 Q1–Q9 其余结论**（表地址链已由 `0x42E439` / `0x48DA3D` / `0x48D920` 独立确证）。
+3. **`res+0xC` 的双重身份**：加载器把 `res+0xC+idx*4` 当“ECL 文件缓冲指针数组”，而 `GetMemAddr(0x4cf2d0,0x188,0xc)`（= `res+0xC`）又是 `ECLJump` 的写入基址。二者因 ECL 数据自 `res+0xC` 起连续布局而自洽（本机不能运行；`.decl` 素材已在机，可离线核对，未实证）。**不影响 Q1–Q9 其余结论**（表地址链已由 `0x42E439` / `0x48DA3D` / `0x48D920` 独立确证）。
 4. **Q7 机体/子机全局地址未定**（§8）。
 5. **真机三态未做**：本机无法运行 th18，全部结论为**静态定案**；`spawn` 子线程是否会短暂占据 `host+0xC` 等运行时行为需真机确认。
 6. **地区/版本变体**：Steam / 汉化版是否共用同一 RVA，需按变体实测。
@@ -778,4 +779,5 @@ if (!section) section = "main";                          // ④ 兜底
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-10-14 | 建档。静态反汇编 th18 ECL VM，回答 Q1–Q9：**Q1 ✅** `*(Edi+4)` = sub **索引**（`Edi`=thread；写点 `0x42E43F` 初始化 `main`、`0x48D9BB` call 成功、`0x48D9A7` 失败→−1、`0x48B474` ret 恢复、`0x48B4D1` 结束→−1、`0x48D899` spawn→−1）；**Q2 ✅** `res = *(u32*)(*(u32*)0x4CF2D0+0x188) = *(u32*)(host+0x1218)`（**本作 `+0x188` 实测成立**）、`table = *(res+0x8C)`、`count = *(res+8)`、项 8 B（`+0` 名 / `+4` 始），加载器 `FUN_0048D9D0`（SCPT `0x54504353`）、按名查表 `FUN_0048D920`、重解码 `FUN_0048DBE0`；**Q3 ✅** 显式调用栈（`SP=thread+0x100C`、底 `thread+0xC`、帧 `0x10`、帧 `+0x0C`=调用者、上限 `0x1000` 护栏 `0x48B778`；`call` `0x48B66C`→压帧 `FUN_0048B030`、`ret` `0x48B43E`；根哨兵 −1；`spawn` `FUN_0048D850` 另起 0x1208 线程挂 `host+0x121C`）；**Q4 ✅** 宿主工厂 `FUN_0042D7D0`（`alloc 0x683c`）、宿主构造 `FUN_0042E100`、`"main"`@`0x4B6634` spawn 站点 `0x444228`/`0x444471`、捕获 `0x44422D`/`0x444476`（EAX=宿主）；根线程 = `host+0x10`（`0x42CE87`/`0x42CF08`）；**Q5 ✅** 命中点 `0x48C822`=`movss [edi],xmm1`(4B `f3 0f 11 0f`)、函数 `FUN_0048B3A0`(0x48B3A0)、opcode 表 `0x48D2A8`/`0x48D3B8`（`0x0A`/`0x0B`/`0x0C` 映射与 th15–17 一致）、步进器 `FUN_0048D420`；**Q6 ✅** 运行期保留名字；**Q7 🟡** 角色名表 `0x4B41E0`（Reimu/Marisa/Sakuya/Sanae）+ 角色函数表 `0x4B41F4/…`，**关卡内 character/shotType 全局未定位**；**Q8 ✅** `ECLJump` 仅写 `goto`(`0x0C`)，`0x48B700` 只改 `thread+0`/`thread+8`；**Q9 ✅ 定案 (A) 调用栈祖先法**。证据：`capstone` 只读反汇编（`../../reasm/th18/reth.py`）+ th15/16/17 逐字段对照。**未真机三态；无 th18 `.ecl`，段落入口白名单待补。** |
+| 2026-10-14 | 建档。静态反汇编 th18 ECL VM，回答 Q1–Q9：**Q1 ✅** `*(Edi+4)` = sub **索引**（`Edi`=thread；写点 `0x42E43F` 初始化 `main`、`0x48D9BB` call 成功、`0x48D9A7` 失败→−1、`0x48B474` ret 恢复、`0x48B4D1` 结束→−1、`0x48D899` spawn→−1）；**Q2 ✅** `res = *(u32*)(*(u32*)0x4CF2D0+0x188) = *(u32*)(host+0x1218)`（**本作 `+0x188` 实测成立**）、`table = *(res+0x8C)`、`count = *(res+8)`、项 8 B（`+0` 名 / `+4` 始），加载器 `FUN_0048D9D0`（SCPT `0x54504353`）、按名查表 `FUN_0048D920`、重解码 `FUN_0048DBE0`；**Q3 ✅** 显式调用栈（`SP=thread+0x100C`、底 `thread+0xC`、帧 `0x10`、帧 `+0x0C`=调用者、上限 `0x1000` 护栏 `0x48B778`；`call` `0x48B66C`→压帧 `FUN_0048B030`、`ret` `0x48B43E`；根哨兵 −1；`spawn` `FUN_0048D850` 另起 0x1208 线程挂 `host+0x121C`）；**Q4 ✅** 宿主工厂 `FUN_0042D7D0`（`alloc 0x683c`）、宿主构造 `FUN_0042E100`、`"main"`@`0x4B6634` spawn 站点 `0x444228`/`0x444471`、捕获 `0x44422D`/`0x444476`（EAX=宿主）；根线程 = `host+0x10`（`0x42CE87`/`0x42CF08`）；**Q5 ✅** 命中点 `0x48C822`=`movss [edi],xmm1`(4B `f3 0f 11 0f`)、函数 `FUN_0048B3A0`(0x48B3A0)、opcode 表 `0x48D2A8`/`0x48D3B8`（`0x0A`/`0x0B`/`0x0C` 映射与 th15–17 一致）、步进器 `FUN_0048D420`；**Q6 ✅** 运行期保留名字；**Q7 🟡** 角色名表 `0x4B41E0`（Reimu/Marisa/Sakuya/Sanae）+ 角色函数表 `0x4B41F4/…`，**关卡内 character/shotType 全局未定位**；**Q8 ✅** `ECLJump` 仅写 `goto`(`0x0C`)，`0x48B700` 只改 `thread+0`/`thread+8`；**Q9 ✅ 定案 (A) 调用栈祖先法**。证据：`capstone` 只读反汇编（`../../reasm/th18/reth.py`）+ th15/16/17 逐字段对照。**未真机三态；段落入口白名单待枚举。** |
+| 2026-10-15 | 素材来源登记：`../exes/ecl/th18/`（`.ecl` 22 份）+ `../exes/ecl_dump/th18/`（`.decl` 22 份；本作无 eclmap，指令 `ins_*`）已在机；据此把「本机无 th18 `.ecl` / 无法离线解码」订正为「`.decl` 素材已在机、段落入口白名单待枚举」。清单见 `docs/logger/decompile_materials.md`。 |

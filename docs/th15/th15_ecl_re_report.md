@@ -5,6 +5,7 @@
 > （⇒ **RVA = VA − 0x400000**）。`textSize = 0xBCA00`，与 `thprac_launcher_games_def.h` th15 ORIGINAL 条目一致。
 > 方法：`pefile` + `capstone 5.0.7` 只读反汇编，并与本机 `../th15decode/th15.exe_decompiled.c`（Ghidra 全量反编译）交叉核对；
 > 另用离线 `.ecl` 解码（`../th15decode/data/st01.ecl`）核实 `main`→`MainSubNN` 结构。
+> ECL / decl 素材：`../exes/ecl/th15/`（原始 `.ecl` 23 份）、`../exes/ecl_dump/th15/`（`thecl -d` 反编译 `.decl` 23 份）；`st01.ecl` 与上文 `../th15decode/data/st01.ecl` 为同一脚本的两处副本。清单与来源见 `docs/logger/decompile_materials.md`。
 > 状态：**静态定案（🟡 已定案、未真机三态）**。Q1/Q2/Q4/Q5/Q6 引用需求文件，本文只补 **Q3 / Q8 / Q9**。
 > 地址口径：正文以 **VA** 为主（本机源码/反编译器同口径），并在关键处标注 **RVA = VA − 0x400000**。
 
@@ -263,3 +264,4 @@ if (!section) section = "main";                         // ④ 兜底
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-14 | 建档。补 **Q3**（显式调用栈：`thread+0x100C`=SP、`thread+0xC` 栈底、帧 `0x10`、帧 `+0x0C`=祖先 sub；`call 0x0B` 压 / `ret 0x0A` 弹；深度上限 ≈256，护栏 `0x1000`；异步另起线程）；**Q8 确认**（`ECLJump` 只写 `goto`，不改 `thread+4`/sub 表，跳转后名字正确）；**Q9 定案为 (A) 调用栈祖先法**（`st01.ecl` 实测 `main→MainFront→MainSubNN`，入口 sub 驻留栈上；根哨兵 `-1` 兜底 `main`）。证据：`capstone` 反汇编 + 本机 `th15.exe_decompiled.c`（Ghidra）+ 离线 `.ecl` 解码。未真机三态。 |
+| 2026-10-15 | 素材来源登记：`../exes/ecl/th15/`（`.ecl` 23 份）+ `../exes/ecl_dump/th15/`（`.decl` 23 份）已在机；`st01.ecl` 与 `../th15decode/data/st01.ecl` 为同一脚本两处副本。清单见 `docs/logger/decompile_materials.md`。 |

@@ -1,0 +1,164 @@
+# 反编译素材清单与来源
+
+> 上位文档：`docs/req_logger.md`（需求）、`docs/logger/logger_re_disasm_overview.md`（总括）。
+> 用途：**登记本机（macOS）现成的反编译素材及其来源**，供后续逆向 / 白名单 CSV 生成引用，避免各篇报告各写各的路径。
+> 素材根：**`../exes/`**（相对 `thprac/` 仓库根，即 `/Users/zerozero/pracWork/thprac/../exes`）。该目录在**仓库之外、不进 git**。
+> 本机无法编译、无法真机运行；素材仅供**只读静态反汇编 / 离线 ECL 解码**。
+
+---
+
+## 0. 一图看全
+
+| 类别 | 位置 | 内容 | 来源 | 逐作数量 |
+| --- | --- | --- | --- | --- |
+| 原始可执行 | `../exes/th07.exe` ~ `th18.exe` | 各作原始 PE | 各作官方安装（详见 §2） | 11 个 |
+| 拆包 ECL | `../exes/ecl/th10`~`th18/*.ecl` | 游戏 `data\*.ecl` 原始脚本 | 各作拆包目录（详见 §3.1） | 8/20/9/21/24/23/22/22/22 |
+| 反编译 decl | `../exes/ecl_dump/th10`~`th18/*.decl` | `thecl -d` 反编译结果 | THTK thtk12（详见 §3.2） | 同左 |
+| dump 汇总 | `../exes/ecl_dump/_dump_report.txt` | 逐作「期望/实际/失败」 | `dump_ecl_decl.ps1` 产出 | 171/171 成功 |
+
+- **`ecl/` 与 `ecl_dump/` 是同一批脚本的两面**：`ecl/thXX/*.ecl` 是**原始二进制**，`ecl_dump/thXX/*.decl` 是其**反编译文本**（sub 名、`@call` 结构等）。
+- th07 / th08 **只有 exe、没有 ecl**（第一代引擎，本轮不在 ECL 监控范围内）。
+
+---
+
+## 1. 目录布局
+
+```text
+../exes/
+├── th07.exe … th18.exe          # 各作原始可执行（§2）
+├── ecl/                          # 拆包 ECL 原始脚本（§3.1）
+│   ├── th10/  default.ecl stage01.ecl … stage07.ecl
+│   ├── th11/  default.ecl stageNN(.ecl/.boss.ecl/.mboss.ecl) stage4c0X{a,b,c}.ecl
+│   ├── th12/  default.ecl stageNN.ecl stage07boss.ecl
+│   └── th13/ … th18/  default.ecl stNN(.ecl/.bs.ecl/.mbs.ecl[2])
+└── ecl_dump/                     # thecl -d 反编译结果（§3.2）
+    ├── _dump_report.txt
+    └── th10/ … th18/  <同名>.decl
+```
+
+---
+
+## 2. 原始可执行（`../exes/*.exe`）
+
+| 作品 | 文件 | 字节 | PE `TimeDateStamp` | 备注 |
+| --- | --- | --- | --- | --- |
+| th07 | `th07.exe` | 650752 | 1066942337 | 日文版；`sha256=f7d03ba1…` 与 `[th07] 东方妖妖梦 (日文版)` 逐字节相同 |
+| th08 | `th08.exe` | 840704 | 1095610188 | 日文版；`sha256=330fbdbf…` 与 `[th08] 东方永夜抄 (日文版)` 逐字节相同 |
+| th10 | `th10.exe` | 487936 | 1186086096 | B 代引擎 |
+| th11 | `th11.exe` | 688128 | 1217734394 | B 代；安装为**汉化版+日文版** |
+| th12 | `th12.exe` | 737280 | 1251344348 | B 代；安装为**汉化版+日文版** |
+| th13 | `th13.exe` | 790528 | 1313589413 | C 代 |
+| th14 | `th14.exe` | 897536 | 1376634201 | C 代 |
+| th15 | `th15.exe` | 951808 | 1444028071 | C 代；**参照作** |
+| th16 | `th16.exe` | 683520 | 1501534029 | C 代 |
+| th17 | `th17.exe` | 747520 | 1565429804 | C 代 |
+| th18 | `th18.exe` | 847360 | 1618619144 | C 代 |
+
+- 全部 `ImageBase = 0x400000`、`RELOCS_STRIPPED`（不重定位）⇒ **`RVA = VA − 0x400000`**。
+- **同一性背书**：上表 th10–th18 的尺寸 / `TimeDateStamp` 与 `thprac/src/thprac/thprac_launcher_games_def.h` 各作 ORIGINAL 条目一致；th07 / th08 另有 sha256 与官方安装逐字节比对记录（见 `docs/th07/`、`docs/th08/` 报告头部）。
+- 各篇 `docs/thXX/thXX_re_disasm_report.md` / `thXX_ecl_re_report.md` 头部引用的 `../exes/thXX.exe` 即本目录。
+
+---
+
+## 3. ECL 素材（`../exes/ecl/` 与 `../exes/ecl_dump/`）
+
+### 3.1 拆包 ECL（原始 `.ecl`）
+
+| 作品 | 目录 | 命名形态 | `.ecl` 数 |
+| --- | --- | --- | --- |
+| th10 | `ecl/th10/` | `stageNN.ecl`（+`default.ecl`） | 8 |
+| th11 | `ecl/th11/` | `stageNN.ecl` / `stageNNboss.ecl` / `stageNNmboss.ecl` / `stage4c0X{a,b,c}.ecl`（+`default.ecl`） | 20 |
+| th12 | `ecl/th12/` | `stageNN.ecl` / `stage07boss.ecl`（+`default.ecl`） | 9 |
+| th13 | `ecl/th13/` | `stNN.ecl` / `stNNbs.ecl` / `stNNmbs.ecl`（+`default.ecl`） | 21 |
+| th14 | `ecl/th14/` | 同上（+`st04bs2.ecl` / `st04mbs2.ecl`） | 24 |
+| th15 | `ecl/th15/` | 同上（+`st01mbs2.ecl` / `st07bs2.ecl`） | 23 |
+| th16 | `ecl/th16/` | 同上（+`st07mbs2.ecl`） | 22 |
+| th17 | `ecl/th17/` | 同上 | 22 |
+| th18 | `ecl/th18/` | 同上 | 22 |
+
+**来源**：各作**安装目录的拆包结果**，取 `<游戏根>\[th<版本>…]\data\*.ecl`（Windows 侧游戏根 `D:\C P\C2H2\`）。切包目录名带方括号前缀（如 `[th10] 东方风神录`、`[th11] 东方地灵殿 (汉化版+日文版)`、`[th18]`），**一关 ≠ 一个 `.ecl`**：`default.ecl` 提供共享 sub，Boss / 道中Boss 段落在 `*bs` / `*mbs` / `*boss` / `*mboss` 里。
+
+### 3.2 反编译 decl（`thecl -d` 产物）
+
+| 作品 | 目录 | `.decl` 数 | 备注 |
+| --- | --- | --- | --- |
+| th10 | `ecl_dump/th10/` | 8 | |
+| th11 | `ecl_dump/th11/` | 20 | |
+| th12 | `ecl_dump/th12/` | 9 | |
+| th13 | `ecl_dump/th13/` | 21 | |
+| th14 | `ecl_dump/th14/` | 24 | |
+| th15 | `ecl_dump/th15/` | 23 | |
+| th16 | `ecl_dump/th16/` | 22 | |
+| th17 | `ecl_dump/th17/` | 22 | |
+| th18 | `ecl_dump/th18/` | 22 | **无 eclmap** ⇒ 指令呈 `ins_*` 形态（sub 名、`@call` 结构不受影响） |
+
+**生成工具**：THTK **release 12** 的 `thecl.exe`（Windows 侧 `D:\C P\C2H2\拆包\THTK\thtk\thtk12\thecl.exe`），
+命令形如 `thecl -d <版本> [-m ECL_MAP_<版本>.txt] <in.ecl> <out.decl>`；`<版本>` 直接取作号 `10 … 18`。
+eclmap（把 `ins_NNN(...)` 翻成具名指令）在 `THTK\MAP\ECL_MAP_<XX>.txt`，**没有 18**，故 th18 不加 `-m`。
+
+**生成脚本**：`docs/logger/tools/dump_ecl_decl.ps1`（Windows / PowerShell）。
+按 `[th<版本>]` 前缀定位唯一含 `data` 的拆包目录，每作 `glob data\*.ecl` 全量 dump，逐文件按「退出码 / 产物非空 / 含 `^void`」判成败，结尾落 `_dump_report.txt`。
+
+**来源链（完整）**：
+
+```text
+各作安装  D:\C P\C2H2\[thNN…]\data\*.ecl
+   │  ① 拆包（thdat，已拆好）
+   ▼
+拆包目录  <游戏根>\[thNN…]\data\*.ecl
+   │  ② thecl -d <ver> [-m ECL_MAP_<ver>.txt]   （THTK thtk12；脚本 dump_ecl_decl.ps1）
+   ▼
+Windows 产物  D:\workshop\reasm\exes\ecl_dump\thXX\*.decl
+   │  ③ 连同原始 .ecl 一并复制到本机
+   ▼
+本机素材  ../exes/ecl/thXX/*.ecl   +   ../exes/ecl_dump/thXX/*.decl
+```
+
+**dump 汇总**（`../exes/ecl_dump/_dump_report.txt`，2026-10-14 20:55:56）：
+
+```text
+th10   期望   8  实际   8  失败 0   <- [th10] 东方风神录
+th11   期望  20  实际  20  失败 0   <- [th11] 东方地灵殿 (汉化版+日文版)
+th12   期望   9  实际   9  失败 0   <- [th12] 东方星莲船 (汉化版+日文版)
+th13   期望  21  实际  21  失败 0   <- [th13] 东方神灵庙
+th14   期望  24  实际  24  失败 0   <- [th14] 东方辉针城
+th15   期望  23  实际  23  失败 0   <- [th15] 东方绀珠传
+th16   期望  22  实际  22  失败 0   <- [th16] 东方天空璋
+th17   期望  22  实际  22  失败 0   <- [th17] 东方鬼形兽
+th18   期望  22  实际  22  失败 0   <- [th18]
+合计：期望 171  成功 171  失败 0
+```
+
+**已知限制**：thtk12 的 th18 格式表不完整（`st06bs.ecl` 有一条 `id 94` 解不出），只影响该**一条指令**，sub 名与 `@call` 结构不受影响。
+
+---
+
+## 4. th15 的 Ghidra 反编译工程（`../th15decode/`）
+
+th15 作为**参照作**，另有一条**独立素材来源**（相对 `thprac/` 仓库根为 `../th15decode/`）：
+
+| 文件 | 内容 |
+| --- | --- |
+| `th15.exe_decompiled.c` | th15.exe 的 **Ghidra 全量反编译 C** |
+| `th15deco.gpr` / `th15deco.rep` | Ghidra 工程文件 |
+| `data/*.ecl`（含 `st01.ecl`） | th15 拆包 ECL（与 `../exes/ecl/th15/` 同源） |
+| `ecl-system.md` / `death.md` / `do.md` / `boss-phase-hook.md` | th15 逆向笔记 |
+
+- `docs/th15/th15_ecl_re_report.md` 头部引用的 `../th15decode/th15.exe_decompiled.c`、`../th15decode/data/st01.ecl` 即来自此处。
+- `../th15decode/data/st01.ecl` 与 `../exes/ecl/th15/st01.ecl` 为**同一份脚本的两处副本**。
+
+---
+
+## 5. 复核方式
+
+- **exe 同一性**：比对 PE `TimeDateStamp` / `textSize` 与 `thprac/src/thprac/thprac_launcher_games_def.h` 对应条目（th07/th08 另有 sha256 与安装逐字节比对）。
+- **decl 完整性**：`_dump_report.txt` 为 171/171 成功、0 失败；单文件判别式 = 存在、非空、含至少一个 `^void`。
+- **ecl ↔ decl 对账**：`ecl/thXX` 与 `ecl_dump/thXX` 文件基名一一对应，数量相同（上表）。
+
+---
+
+## 6. 变更记录
+
+| 日期 | 变更 |
+| --- | --- |
+| 2026-10-15 | 建档。登记 `../exes` 下的 exe / ecl / decl 与 `../th15decode/` 的来源、清单、生成链与复核方式；作为各篇 `thXX_ecl_re_report.md` 的素材来源统一出处。 |

@@ -6,7 +6,8 @@
 > 方法：`pefile 2024.8.26` + `capstone 5.0.7` 只读静态反汇编（**本机无 IDA/Ghidra/radare2**）；
 > 与 th15 的 **Ghidra 全量反编译 C**（`../th15decode/th15.exe_decompiled.c`）与 th15 结论逐函数对照；
 > 同代同源，th17 的 ECL 解释器与 th15 **结构一致**（指令级基本重合）。
-> 状态：**静态定案（🟡 已定案、未真机三态）**。全部结论均有“地址 + 反汇编片段”支撑；无 `.ecl` 可供脚本级实测。
+> ECL / decl 素材：`../exes/ecl/th17/`（原始 `.ecl` 22 份）、`../exes/ecl_dump/th17/`（`thecl -d` 反编译 `.decl` 22 份），清单与来源见 `docs/logger/decompile_materials.md`。
+> 状态：**静态定案（🟡 已定案、未真机三态）**。全部结论均有“地址 + 反汇编片段”支撑；脚本结构未经实测（`.decl` 素材已在机，可离线补脚本级证据）。
 > 地址口径：正文以 **VA** 为主，关键处附 **RVA = VA − 0x400000**；本机 thprac 源码同 VA 口径。
 > 只读：本文为新建文件，未改动任何既有文件。
 
@@ -498,15 +499,15 @@ if (!section) section = "main";                         // ③ 兜底
 - [ ] **练习跳章后**：`thread+4` 名字、上溯结果均正确（Q8 复核）。
 - [ ] **异步关**：含 `spawn` 的段落，主线 `thread` 的当前 sub 稳定为 `MainSubNN`（不被异步子脚本污染）。
 - [ ] 采样时机取**帧间稳定态**（IGI 渲染），避免表达式临时栈占用 `SP` 时误读。
-- [ ] **`ECLJump` 落点**：抽验 stage1 portion2/3（`0x7C3C`/`0x7CD8`）等跳转落点是否命中 `call MainSubNN`（无 `.ecl`，本机只能真机验）。
+- [ ] **`ECLJump` 落点**：抽验 stage1 portion2/3（`0x7C3C`/`0x7CD8`）等跳转落点是否命中 `call MainSubNN`（`../exes/ecl_dump/th17/` 素材已在机，可离线核对落点；运行期仍待真机验）。
 
 ---
 
 ## 11. 未定论 / 风险项
 
-1. **Q9 未经脚本级实测**：th17 **无离线 `.ecl`**，且本机不能运行；(A) 结论基于“与 th15 同源同形 + VM 逐指令比对 + 现成 `mainLatterIDs` 用法”，属**静态强推断**，建议真机复核一次上溯行为。
+1. **Q9 未经脚本级实测**：th17 本机不能运行、脚本结构未经实测（`.decl` 素材已在机，可离线补证）；(A) 结论基于“与 th15 同源同形 + VM 逐指令比对 + 现成 `mainLatterIDs` 用法”，属**静态强推断**，建议真机复核一次上溯行为。
 2. **`Edi` 是否主线**：`0x47A712` 对任意 thread 命中（§4.4）。若直接沿用现有钩子而不做宿主过滤，理论上可能读到异步/敌方子脚本的 sub。当前 thprac 用法靠 `subID==mainLatterIDs[stage]` + `bossExists` 间接规避。
-3. **`res+0xC` 的双重身份**：建表器把 `res+0xC+idx*4` 当“SCPT 块指针数组”写读，而 `GetMemAddr(0x4b76a0,0x17C,0xC)`（= `res+0xC`）又是 `ECLJump` 的写入基址。二者可能因 ECL 数据在 `res+0xC` 起**连续布局**而自洽（本机无 `.ecl`/无法运行，未实证）。**不影响 Q1–Q9 其余结论**（表的地址链已由 `0x41ED6F`/`0x47AF5D`/`0x47AE40` 独立确证）。
+3. **`res+0xC` 的双重身份**：建表器把 `res+0xC+idx*4` 当“SCPT 块指针数组”写读，而 `GetMemAddr(0x4b76a0,0x17C,0xC)`（= `res+0xC`）又是 `ECLJump` 的写入基址。二者可能因 ECL 数据在 `res+0xC` 起**连续布局**而自洽（本机不能运行；`.decl` 素材已在机，可离线核对，未实证）。**不影响 Q1–Q9 其余结论**（表的地址链已由 `0x41ED6F`/`0x47AF5D`/`0x47AE40` 独立确证）。
 4. **地区/版本变体**：Steam/汉化版是否共用同一 RVA 需按变体实测。
 
 ---
@@ -516,3 +517,4 @@ if (!section) section = "main";                         // ③ 兜底
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-14 | 建档。静态反汇编 th17 ECL VM，回答 Q1–Q9：**Q1** `*(Edi+4)`=sub 索引（写点 `0x47AEDB/0x478B40/0x41D6C7/0x47ADB9`）；**Q2** `res=*(host+0x11F8)=*(*(u32*)0x4b76a0+0x17C)`、`table=*(res+0x8C)`、`count=*(res+8)`、项 8B（`+0`名/`+4`始），建表器 `0x47AEF0`、查表 `0x47AE40`；**Q3** 显式调用栈（`SP=thread+0x100C`、底 `thread+0xC`、帧 `0x10`、帧 `+0xC`=调用者、上限 `0x1000`、护栏 `0x478E1C`；`call 0x478D22`/`ret 0x478B0A`；spawn `0x47AD70` 另起线程）；**Q4** 主线宿主 spawn `0x431C58/0x431E83`（`call 0x41E140`，EAX=宿主），命中点 `Edi` 非必然主线；**Q5** 入口 `FUN_00478A70`、4B=`movss [edi],xmm1`、调用链 `0x47A940→0x478A70`；**Q6** 运行期保留名字；**Q7** `character=0x4B59F4`、`shotType=0x4B59F8`；**Q8** `ECLJump` 只写 `goto(0x0C)`，不改 sub；**Q9** 定案 **(A) 调用栈祖先法**。证据：`capstone` 反汇编 + th15 Ghidra 全量反编译对照。未真机三态。 |
+| 2026-10-15 | 素材来源登记：`../exes/ecl/th17/`（`.ecl` 22 份）+ `../exes/ecl_dump/th17/`（`.decl` 22 份）已在机；据此把「无 `.ecl` 可供脚本级实测 / 本机无 `.ecl`」订正为「`.decl` 素材已在机，可离线补脚本级证据」。清单见 `docs/logger/decompile_materials.md`。 |

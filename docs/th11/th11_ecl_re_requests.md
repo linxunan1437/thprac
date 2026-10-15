@@ -3,6 +3,7 @@
 > 总括方案：`docs/logger/logger_re_disasm_overview.md`。
 > 需求来源：`docs/req_logger.md`（本迭代＝**仅监控**）。
 > 二进制：`../exes/th11.exe`，688128 字节，PE `TimeDateStamp = 1217734394`，`ImageBase = 0x400000`，`RELOCS_STRIPPED`（`RVA = VA − 0x400000`）。
+> ECL / decl 素材：`../exes/ecl/th11/`（原始 `.ecl` 20 份）、`../exes/ecl_dump/th11/`（`thecl -d` 反编译 `.decl` 20 份）。清单与来源见 `docs/logger/decompile_materials.md`。
 > 引擎代：**B 代（第二代引擎）**；同代参照：th10 / th12 / th13。
 > thprac 现有支持：`thprac/src/thprac/thprac_th11.cpp`。
 > ⚠️ 本作 **stage 4 存在剧情分支**。

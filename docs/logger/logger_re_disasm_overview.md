@@ -3,8 +3,9 @@
 > 需求来源：`docs/req_logger.md`
 > 本迭代范围：**仅监控**（**实时显示“当前段落”**；读 ECL sub 只是判定手段）；**不含日志记录**（JSON 落盘、checkpoint 统计、miss/bomb 列表）。
 > 逐作需求：`docs/<作>/<作>_ecl_re_requests.md`（th10 ~ th18）。
+> 反编译素材清单与来源：`docs/logger/decompile_materials.md`。
 > 文档类型：**逆向需求文档（requests）**。§5 的“结论/状态”列由后续逆向迭代回填。
-> 本机为 macOS（Darwin/arm64），无法编译、无法真机运行；`../exes/th10.exe ~ th18.exe` 已在本机，`capstone 5.0.7` + `pefile` 可用（供后续只读静态反汇编）。
+> 本机为 macOS（Darwin/arm64），无法编译、无法真机运行；`../exes/th10.exe ~ th18.exe`、`../exes/ecl/`（原始 `.ecl`）、`../exes/ecl_dump/`（`thecl -d` 反编译 `.decl`）已在本机，`capstone 5.0.7` + `pefile` 可用（供后续只读静态反汇编 / 离线 ECL 解码）。
 
 ---
 
@@ -144,7 +145,7 @@ cache = section;                                            // 供 IGI 读取显
 
 ### 5.1 引擎 / 逆向锚点
 
-| 作 | 代 | 二进制（../exes） | 已有 ECL 解释器命中点（寄存器） | 命中点已知字段 | ECL 数据区链（THSectionPatch `SetBaseAddr` 来源） | sub 名/索引线索 |
+| 作 | 代 | 二进制 / ECL 与 decl（../exes） | 已有 ECL 解释器命中点（寄存器） | 命中点已知字段 | ECL 数据区链（THSectionPatch `SetBaseAddr` 来源） | sub 名/索引线索 |
 | --- | --- | --- | --- | --- | --- | --- |
 | th10 | B | th10.exe 487936B ts=1186086096 | `0x44fb9f`(2B) `Esi` | `*(f32)Esi`=当前时间；主线 `[Esi+0x1014]+0x103c+0x1444==1296` | `GetMemAddr(0x477704, 0x54, 0xC)` | ❌ |
 | th11 | B | th11.exe 688128B ts=1217734394 | `0x45d2a3`(2B) `Edi` | `*(f32)Edi`=当前时间；主线 `[Edi+0x1014]+0x103c+0x1580==20512` | `GetMemAddr(0x4a8d7c, 0x64, 0xC)` | ❌ |
@@ -157,6 +158,7 @@ cache = section;                                            // 供 IGI 读取显
 | th18 | C | th18.exe 847360B ts=1618619144 | `0x48c822`(4B) `Edi` | `[Edi+4]`=subID | `GetMemAddr(0x4cf2d0, 0x188, 0xc)` | 🟡 有 subID，名字表待定 |
 
 > 二进制同一性：以上 ts 与 `thprac/src/thprac/thprac_launcher_games_def.h` 的识别表一致；均 `ImageBase=0x400000`、`RELOCS_STRIPPED`。
+> **ECL / decl 素材**：th10–th18 的原始 `.ecl`（`../exes/ecl/thXX/`）与 `thecl -d` 反编译 `.decl`（`../exes/ecl_dump/thXX/`）均已在机（各作 8/20/9/21/24/23/22/22/22，共 171 份，dump 171/171 成功），可离线枚举各关段落入口 sub；清单与来源见 `docs/logger/decompile_materials.md`。
 > **需静态厘清的首要矛盾**：`[执行对象+4]` 到底是“sub 索引”还是“指令指针”。th15 证实 `thread+4`=**索引**；th16/17/18 当索引用；th14 却当“指令指针”做区间比较。若 th14 的 `Edi` 即 thread，则 th14 现有注释有误。
 > **读到的 sub → 当前段落**：本表各作的 sub/索引结论，需再经白名单映射为“段落入口”，最终显示**当前段落**（见 §1.2、§2.1、§6 Q9）。
 
@@ -250,7 +252,7 @@ cache = section;                                            // 供 IGI 读取显
 
 1. **段落判定口径（A 调用栈祖先 / B 顺序 latch）**：需求原文默认 A，但若段落入口 sub 不驻留栈，则 A 会误判为 `main`；必须先按 Q9 定口径（这是本功能能否成立的前置）。
 2. **函数栈是否存在**：若走 A，依赖可遍历的子调用栈；若引擎没有显式栈，需改为 B（离线入口表 + latch）。
-3. **运行期是否保留名字**：若 B 代（th10–13）运行期不保留 sub 名，则强依赖白名单 CSV + 各作 `.ecl` 才能做“名字↔索引/偏移”映射（Q6）。
+3. **运行期是否保留名字**：若 B 代（th10–13）运行期不保留 sub 名，则强依赖白名单 CSV + 各作 `.ecl` 才能做“名字↔索引/偏移”映射（Q6）。**各作 `.ecl`/`.decl` 素材已在机**（`../exes/ecl/`、`../exes/ecl_dump/`，见 `docs/logger/decompile_materials.md`），该映射可离线建立。
 4. **`[执行对象+4]` 语义矛盾**：th14 与 th16/17/18 的注释不一致，必须先厘清（Q1）。
 5. **th12 / th13 无现成 ECL 命中点**：需从 `THSectionPatch` 的 ECL 数据区链 + 同代（th10/11）模板切入（已确认的切入点）。
 6. **locale 文案**：`thprac_locale_def.h/.cpp` 是由外部 devtools 生成的，本地无法重新生成；IGI 新增行优先复用既有词条或使用 ASCII 占位，避免动 locale 表。
@@ -265,3 +267,4 @@ cache = section;                                            // 供 IGI 读取显
 | --- | --- |
 | 2026-10-14 | 建档。范围＝监控（第一迭代）；确定总括 + 逐作（th10–18）的 requests 结构；汇总既有 ECL 解释器命中点、ECL 数据区链、miss/bomb 钩子、IGI 类名；定义通用问题 Q1–Q8。未跑逆向。 |
 | 2026-10-14 | **口径修正为目标＝实时显示「当前段落」**：checkpoint 定义为“段落开头对应的白名单函数（段落入口函数）”，读 ECL sub 降为手段。§0 表格、§1、§2 术语、§3 伪代码、§5.1 注记同步改写；新增 §2.1“与 Warp 的关系与粒度约定”；新增 **Q9（段落判定口径：A 调用栈祖先 / B 顺序 latch）**；§8/§9 相应调整。 |
+| 2026-10-15 | **登记反编译素材来源**：新增 `docs/logger/decompile_materials.md`（`../exes` 的 exe / ecl / decl 与 `../th15decode/` 的来源、清单、生成链、复核方式）；文档头与 §5.1 表头、注记同步指向该清单，明确 th10–18 各作 `.ecl`/`.decl` 已在机、可离线枚举段落入口。 |
