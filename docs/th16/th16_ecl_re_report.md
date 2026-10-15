@@ -542,6 +542,8 @@ if (section) current = section;          // 未命中 → no-op（保持 current
 | ST4 后半 #3 | `MainSub05` | | |
 
 > 已写入 `docs/logger/th16_checkpoints.csv` 的章节行（39 行）。**boss 行**（`MID`/`BOSS`/`END_*`/`*_FINAL`）留待下一轮：其区分点在 `stNNbs`/`stNNmbs` 的 boss 脚本 sub（`Boss`/`Boss1`/`BossCard1`/`MBoss` 等）+ `$SPELL_ID` 派发，不在 stage 文件的偏移上。
+>
+> **boss 段续篇**：boss 段监控的「方案一（boss 下一阶段名 + 映射）/ 方案二（boss 宿主 ECL sub 名）」两方案调研**已单独立档** → `docs/th16/th16_boss_phase_report.md`（boss 对象 `B = host+0x120C`、`*(B+0x44B8)=host`、固定偏移取 ECL 对象、72 行 boss 行待回填等）。
 
 ---
 
@@ -566,3 +568,4 @@ if (section) current = section;          // 未命中 → no-op（保持 current
 | 2026-10-14 | 建档（本报告）。静态定案 Q1–Q9：Q1 `[Edi+4]`=sub 索引（写入点 `0x41B8B2`/`0x4720EB`/`0x471FA3`/`0x472143`）；Q2 `res=*(*(0x4A6DC0)+0x17C)`、`table=res+0x8C`、项 8B（加载器 `FUN_00474530`，查表 `FUN_00474740`）；Q3 显式调用栈（`SP=thread+0x100C`、栈底 `thread+0xC`、帧 `0x10`、帧 `+0x0C`=祖先、上限 `0x1000`，`call 0x0B`/`ret 0x0A`，与 th15 逐指令同构）；Q4 宿主 spawner `FUN_0041AA70`、站点 `0x42DD52`/`0x42DF69`（`"main"`@`0x492270`），命中点可直接 `*(Edi+0x1018)` 取宿主；Q5 命中点 `0x473995`=`movss [edi],xmm0`(4B)、函数 `FUN_00472030`、opcode 表 `0x473A4C`/`0x473B58`；Q6 运行期保留名字；Q7 `CHARACTER=0x4A57A4`/`SUBSHOT=0x4A57AC`；Q8 `ECLJump` 只写 `goto`(0x0C)，不改 `thread+4`；Q9 定案 **(A) 调用栈祖先法**〔**后于 2026-10-15 订正为「路过式 checkpoint（latch）」**〕。更正编排者初判：`0x4739BC` 处下标为 `[Edi+0x11A4]`（活跃槽），非 `thread+4`。证据：`capstone` 反汇编 + th15 Ghidra 全量反编译 C 逐函数对照。**未真机三态；段落入口白名单待枚举。** |
 | 2026-10-15 | 素材来源登记：`../exes/ecl/th16/`（`.ecl` 22 份）+ `../exes/ecl_dump/th16/`（`.decl` 22 份）已在机；据此把「本机无 th16 `.ecl` / 离线枚举无法完成」订正为「素材已在机、段落入口白名单待枚举」。清单见 `docs/logger/decompile_materials.md`。 |
 | 2026-10-15 | **订正 Q9 口径 + 回填章节行**：Q9 由「(A) 调用栈祖先法」改为「**路过式 checkpoint（latch）**」——经过白名单函数即置值、不在表内 no-op（不回退 `main`）；原因：段内 `MainSubNN` 是 `MainFront`/`MainLatter` 的**兄弟 `call`**，不互为祖先，「整段驻留栈上」不成立。据此**每 checkpoint 只登记 1 个入口函数**。已离线枚举并回填 `docs/logger/th16_checkpoints.csv` 的 **39 行章节行**（含 4 个 async 落点）；§0 Q9 行、§10、§11 同步改写。boss 行留待下一轮。 |
+| 2026-10-15 | **新增 boss 段监控两方案调研报告交叉引用**：§10.4 追加指向 `docs/th16/th16_boss_phase_report.md`（boss 段监控「方案一/方案二」已单独立档）；本次仅回填交叉引用与变更记录，正文 Q1–Q9 结论不变。 |
