@@ -2,7 +2,7 @@
 
 > 上位文档：`docs/logger/logger_re_disasm_overview.md`（ECL 段落监控总括）、`docs/req_logger.md`（需求）。
 > 用途：为某作的**监控白名单 CSV** 生成骨架。每行 = 一个 checkpoint（章节 或 boss 段落）。
-> 本阶段只填 `记录名 / 所属关卡 / 所属游戏`，`段落入口函数` 留空，待逆向回填（读 ECL sub）。
+> 骨架阶段只填 `记录名 / 所属关卡 / 所属游戏`；`段落入口函数` 的回填流程见 **§4.5**（口径：**路过式 checkpoint / latch**）。
 > 参考成品：`docs/logger/th15_checkpoints.csv`。
 > 地址/术语口径见总括；本文只讲「怎么把 CSV 造出来」。
 
@@ -39,7 +39,7 @@
 - `docs/logger/thXX_checkpoints.csv`，UTF-8，`1 行表头 + N 行数据`。
 - 列顺序：`段落入口函数,所属游戏,所属关卡,记录名`
 - 取值：
-  - `段落入口函数` = 空
+  - `段落入口函数` = 空（**骨架阶段**；回填流程见 §4.5）
   - `所属游戏` = `thXX`
   - `所属关卡` = `ST1` … `ST7`（第 7 关 thprac UI 显示为 **Extra**，本 CSV 统一写 `ST7`）。**只为 ST1..ST7 出行**；cba 中超出 ST1..ST7 的组是「路线分支套」，一律不出行（见 §4/§6）
   - `记录名` = 见 §3 / §4
@@ -69,6 +69,29 @@
 
 ---
 
+## 4.5 回填「段落入口函数」（warp 落点 → ECL sub）
+
+> 骨架阶段 `段落入口函数` 留空；本步用 thprac 的 warp 偏移 + 各作离线 `.ecl`/`.decl` 回填。
+> **完整流程（解析口径、参考脚本、自检、边界）见 `docs/logger/checkpoint_entry_backfill_workflow.md`；本节为速览。**
+
+**判定口径（路过式 checkpoint / latch）**：CSV 是**白名单表**——运行期读「当前 sub」：**∈ 表 → 置当前段落为该记录名**；**不在 → no-op**（保持上一个值，**不回退 `main`**）。因此**每个 checkpoint 只填 1 个「段落入口函数」**，不需要覆盖段内每个 sub。
+> 依据：段内多个 `MainSubNN` 是 `MainFront`/`MainLatter` 的**兄弟 `call`**，彼此不互为祖先，「整段驻留栈上」不成立。详见 `logger_re_disasm_overview.md` §6 Q9。
+
+**取值规则**：
+
+1. **文件槽**：`ECLHelper::SetBaseAddr` 默认 **slot 0 = `stNN.ecl`**；`SetFile(N)` 取该关 `ecli{}` 的第 N 项（**各关顺序不同**，如 th16 ST1 `{default,st01bs,st01mbs}`、ST5 `{default,st05mbs,st05bs}`）。
+2. **指令布局**：`time(4) + id(u16) + size(u16) + mask(4) + params`；sub 以 `"ECLH"` 开头、头长 `0x10`，首指令在 `substart+0x10`。
+3. **章节行**（`THStageWarp`）：该段**最后一条** `ECLJump` 的 `dest` 落在 `call`/`async call MainSubNN`（opcode `0x0B`/`0x0F`）上 → 填**被调者**；该段若无第二条 `ECLJump`（含 portion 1），填对应容器（`MainFront`/`MainLatter`）的**首个子**。
+4. **boss 行**（`THPatch`）：主跳转落在 `main` 的 `call MainBoss` / `enmCreateA "Boss"/"MBoss"` 上；真正区分第几个 boss 段的是对 `stNNbs`/`stNNmbs` 的补丁与 `$SPELL_ID` 派发 → 填对应 **boss 脚本 sub**（`Boss`/`Boss1`/`BossCard1`/`MBoss` 等）。（**暂缓**，见 §6。）
+5. **async 落点照挂**：`async call`（opcode `0x0F`）的被调者**照填**，不因 async 跳过。
+6. 名字直接取离线 `.decl` 的 `void <Name>()`（与 `.ecl` sub 表项 `+0` 一致）。
+
+**自检**：每行恰 1 个函数名；入口 ∈ 该关 `.ecl` 的 sub 名集合；与 `THStageWarp`/`THPatch` 偏移一一对应；异步落点未被跳过。
+
+> 参考成品：`docs/logger/th16_checkpoints.csv`（章节行 39 行已回填）；逐作 §10 入口表见 `docs/thXX/thXX_ecl_re_report.md`。
+
+---
+
 ## 5. 排序（可读性，不影响监控）
 
 按关分组，每关内：**章节行 → MID 行 → BOSS/END 行**；关卡顺序固定 `ST1..ST7`。
@@ -87,6 +110,7 @@
 - **th15 ST3**：关底Boss 列表混入 `TH15_ST8_AB_TEST`（测试段）→ **排除**（th15 boss 73 行）。
 - **各作 ST7 关底列表同构**：`END_NS1,S1,NS2,S2,…,NS8,S8,S9,S10` —— 共 **18 项**，**止于 `S9/S10`，没有 `NS9/NS10`**（勿手抄成 `NS1..NS10` 交替；th14 生成时曾误加两项，已按源码修正）。
 - 起始哨兵 `A0000ERROR` / 空列表 → **一律不出行**。
+- **回填的边界**：章节行入口可由 `THStageWarp` 偏移直接定；**boss 行**（`MID`/`BOSS`/`END_*`/`*_FINAL`）的区分点在 `stNNbs`/`stNNmbs` 的 boss 脚本 sub + `$SPELL_ID` 派发，需额外解码，**暂缓**（见 §4.5 规则 4）。**async 落点照挂**，不跳过。
 
 ---
 
@@ -98,7 +122,8 @@
 - [ ] 每行 4 字段；`记录名` 非空且无 `#0`
 - [ ] `记录名` 前缀（章节=`STn`；boss=`STn`，去掉空格后）== `所属关卡`，且 `所属关卡` ∈ {ST1..ST7}
 - [ ] 无路线分支套残留（无 `ST4A/ST4B`；th11 无 `ST4 <route>_*`）
-- [ ] `所属游戏` 一律 `thXX`；`段落入口函数` 全空；无 `THxx_` 前缀残留
+- [ ] `所属游戏` 一律 `thXX`；无 `THxx_` 前缀残留
+- [ ] **骨架阶段**：`段落入口函数` 全空；**回填后**：每行恰 1 个函数名，且 ∈ 该关 `.ecl` 的 sub 名集合（见 §4.5）
 
 ---
 
@@ -131,6 +156,7 @@
 > 下表九作 CSV 均已生成于 `docs/logger/thXX_checkpoints.csv` 并核验通过（每行 4 字段、无空记录名、无 `#0`、无 `THxx_` 残留、记录名前缀 == 所属关卡）。
 > boss 行数含**不带 `MID/BOSS` 字样**的关底项（th15 `ST6 STARS`；th16 `*_FINAL`）。
 > th10–th13 的核验方式：重新解析 `mChapterSetup` 与各作 `th_sections_cba` 后与 CSV 逐行 diff，全部精确匹配（无缺失/无多余）。
+> **回填进度**：th16 的**章节行**已按 §4.5 回填（39/39）；其余作及 boss 行仍为空。
 
 | 作 | 章节行 | boss 行 | 合计 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -174,3 +200,5 @@
 | 2026-10-15 | **执行并核验**：按本文档生成 th14–th18 五个 CSV（th14 131 / th15 120 / th16 111 / th17 105 / th18 114 行），§9 补「实产各关合计」；§6 补 ST7 关底列表止于 `END_S9/END_S10`（无 NS9/NS10）的说明。 |
 | 2026-10-15 | **扩展至 th10–th13**：新增四作 CSV（th10 109 / th11 173 / th12 114 / th13 116 行），§9 扩为「九作行数」并补各关合计；登记新边界 —— th11 cba 为 13 组（组 7–12 为 ST4 自机路线分支，归 `ST4`）、th13 ST2 `THStageWarp` 7 case 与 `mChapterSetup` 6 不一致（以 `mChapterSetup` 为准）。 |
 | 2026-10-15 | **删路线分支套（消除重复）**：确认 th14 `ST4A/ST4B`、th11 `ST4_RA..MC` 与朴素 ST4 指向同一批原生段落（th14 的 A/B 由 `faketype` 决定、patch 无对应 case；th11 朴素组 3＝并集 23 项、路线组 48 行仅覆盖同样 23 项）→ **规则改为只取 cba 组 0..6（ST1..ST7）**；重生成 th11（173→**125**）、th14（131→**115**）。§2/§4/§5/§6/§7/§9 同步修订。 |
+| 2026-10-15 | **抽出独立流程文档**：新增 `docs/logger/checkpoint_entry_backfill_workflow.md`（ECLJump 落点 → ECL sub 的完整回填流程 + 参考脚本 + 自检；含已废弃写法的登记）。§4.5 加指向。 |
+| 2026-10-15 | **新增 §4.5「段落入口函数回填」**：定口径为**路过式 checkpoint（latch）**（经过白名单函数即置值、不在表内 no-op、不回退 `main`）→ **每 checkpoint 只填 1 个入口函数**（= warp 落点所进入的 sub，**含 async**）。给出文件槽/指令布局/章节行/boss 行取值规则与自检；同步 §2、§6、§7、§9。据此回填 **th16 章节行 39 行**（见 `docs/logger/th16_checkpoints.csv`；boss 行暂缓）。 |

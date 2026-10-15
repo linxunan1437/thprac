@@ -25,7 +25,7 @@
 | **Q6 名字来源** | ✅ 运行期保留 sub 名（`table[i].name` 为 `char*`） | 按名查表 `0x47AE40` 逐字节 strcmp，证明名字在内存中。 |
 | **Q7 机体/子机** | ✅ `character = 0x4B59F4`、`shotType = 0x4B59F8` | 与 thprac IGI `*0x4B59F4*3 + *0x4B59F8` 一致；读写点均在。 |
 | **Q8 练习跳转补丁** | ✅ **不影响 subIdx/名字判读** | `ECLJump` 只写 `goto`(`0x0C`)；`goto` 只改 `thread+0`(time) 与 `thread+8`(ip)，不动 `thread+4`、不动 sub 表。 |
-| **Q9 段落判定口径** | ✅ **走 (A) 调用栈祖先法** | 与 th15 同源同形：显式 `call 0x0B` 压帧 / `ret 0x0A` 弹，段落入口 `call` 后驻留栈上。 |
+| **Q9 段落判定口径** | ✅ **路过式 checkpoint（latch）** | CSV 即白名单：当前 sub ∈ 表 → 置当前段落；**不在 → no-op**（不回退 `main`）。**每 checkpoint 只登记 1 个入口函数**（含 async 落点）。 |
 
 > **关键地址（VA / RVA）**
 > 主分发（ECL VM step）`FUN_00478A70` = `0x478A70` / `0x78A70`；压帧 `FUN_00478730` = `0x478730` / `0x8730`；
@@ -446,46 +446,33 @@ ecl << ecl_time << 0x0018000C << 0x02ff0000 << 0x00000000 << (dest - start) << a
 
 ---
 
-## 9. Q9 — 段落判定口径：**(A) 调用栈祖先法**（决定成败）
+## 9. Q9 — 段落判定口径：**路过式 checkpoint（latch）**（决定成败）
 
 ### 9.1 结论
 
-✅ **走 (A) 调用栈祖先法。** th17 与 th15 **同代同源、VM 逐指令同形**：段落入口 sub 由 `call`(`0x0B`) 进入并**在整个段落期间驻留栈上**，`ret`(`0x0A`) 时才弹出；沿 §3.5 遍历即可上溯到最近的白名单段落入口。
+✅ **走「路过式 checkpoint（latch）」**：读当前 sub；**∈ 白名单则置当前段落；不在 → no-op**（保持上一个值，不回退 `main`）；本局首次命中前显示 `main`。CSV 即白名单表。
 
-### 9.2 依据
+> ⚠️ **本处订正**：早期草案写「(A) 调用栈祖先法」，与段内脚本结构不符（原因见 9.2）。
 
-1. **显式调用栈确实存在**（§3）：`call` 压帧、`ret` 弹帧、帧 `+0xC` 即调用者 sub。这是一条**真实、可遍历、有驻留语义**的调用链。
-2. **段入口以 `call` 组织**：主线宿主由 `host::SetSubByName("main")` 起步（§4.2），其后 `@MainFront`/`@MainLatter`/`@MainSubNN` 等子脚本以 `call` 进入；运行到段落内任意子 sub 时，其祖先链必含段落入口 `MainSubNN`。
-3. **现成用法佐证**：thprac 现有 `0x47A712` 钩子用 `subID == mainLatterIDs[stage]`（`{0,87,91,86,88,92,0}`）判定 “MainLatter”——`mainLatterIDs` 是**主线段的 sub 索引**，说明段落的稳定标识就是**这些被 `call` 的 sub 自身**（进入即命中当前 sub，无需“顺序经过”）。
-4. **对照定案模板**：th15 已由离线 `.ecl` 实测 `main → call MainFront → call MainSubNN`，段落入口驻留栈上，定案为 (A)；th17 的 `call/ret/帧/表` 与其逐条对应。
+### 9.2 依据与订正原因
 
-⇒ **不需要 (B) 的顺序 latch**；(B) 会引入“何时算经过”的歧义，本作无必要。
+1. **显式调用栈确实存在**（§3）：`call` 压帧、`ret` 弹帧、帧 `+0xC` 即调用者 sub —— 这是**事实**，但**不用于**本判定。
+2. **段入口以 `call` 组织**：主线宿主由 `host::SetSubByName("main")` 起步（§4.2），其后 `@MainFront`/`@MainLatter`/`@MainSubNN` 等子脚本以 `call` 进入。**但一个段落可能跨多个兄弟子脚本**（前一个 `ret` 后才 `call` 下一个），它们**不互为祖先** ⇒ 「段落入口 sub **整段**驻留栈上、可沿栈上溯」的 (A) 前提对**整个段落**不成立（只对单个 sub 成立）。
+3. **段落的稳定标识 = 被 `call` 的入口 sub 自身**：thprac 现有 `0x47A712` 钩子用 `subID == mainLatterIDs[stage]`（`{0,87,91,86,88,92,0}`）即按**当前 sub** 判定；这也印证「进入即命中当前 sub」的路过式（latch）口径。
+4. ⇒ **每段只登记 1 个入口 sub**（段内其余 sub 不在表内 → no-op）；不需要为段内每个 sub 建条目。
 
-### 9.3 两个必须写进实现的细节（同 th15）
-
-1. **根哨兵 `-1`**：`main` 首次 `call`（栈空 `SP==0`）压入的帧 `帧[+0x0C]=-1`（`0x478987` 分支写 `-1`）；遍历遇 `caller==-1` 即“到底”，兜底为 **`main`**。
-2. **当前 sub 先行判定**：先查 `*(i32*)(thread+4)`（可能已是 `MainSubNN`），再遍历祖先；两步共用同一 `res/table/名字` 链与白名单。
+### 9.3 判定流程（同 th15 / th16）
 
 ```cpp
 host   = mEclHost;                            // 0x431C5D / 0x431E88 捕获（EAX）
 thread = (host == 0) ? 0 : *(u32*)(host + 0x0C);
 idx    = *(i32*)(thread + 4);                 // 当前 sub
 name   = NameOf(host, idx);                   // res=*(host+0x11F8); table=*(res+0x8C)
-section = Whitelist(game, stage, name);       // ① 当前 sub 即段入口？
-if (!section) {
-    for (uint32_t sp = *(u32*)(thread+0x100C);
-         sp >= 0x10 && sp < 0x1000;
-         sp = *(u32*)(thread + 0x0C + sp - 0x10)) {
-        int32_t caller = *(i32*)(thread + 0x0C + sp - 4);
-        if (caller < 0) break;                          // 根哨兵 → main
-        section = Whitelist(game, stage, NameOf(host, caller));
-        if (section) break;                             // ② 最近的白名单祖先
-    }
-}
-if (!section) section = "main";                         // ③ 兜底
+section = Whitelist(game, stage, name);       // 命中 → 置当前段落
+if (section) current = section;               // 未命中 → no-op（保持 current，不回退 main）
 ```
 
-> 白名单粒度 = `MainSubNN`；容器 `main/MainFront/MainLatter` 命不中即回退。
+> checkpoint 粒度 = 每行 1 个入口 sub（= warp 落点所进入的 sub，**含 async 落点**）；容器 `main/MainFront/MainLatter` 不入表。
 
 ---
 
@@ -495,9 +482,9 @@ if (!section) section = "main";                         // ③ 兜底
 - [ ] **sub 表链**：`res=[*(u32*)0x4b76a0]+0x17C` 非空、`res+0x8C` 可读、`count=*(res+8)` 合理、索引越界保护生效。
 - [ ] **宿主捕获**：在 `0x431C5D`/`0x431E88` 命中，`EAX` 指向的对象 `+0x11F8` 即 `res`、`+0x11FC` 线程链非空。
 - [ ] **是否主线**：确认 `0x47A712` 命中时 `Edi` 可能非主线（如 spawn 子线程）；用 `*(Edi+0x1018)==mainHost` 过滤后显示稳定。
-- [ ] **函数栈上溯**：段内取一个非白名单子 sub，确认上溯命中最近 `MainSubNN`；根哨兵处按 `main` 兜底。
-- [ ] **练习跳章后**：`thread+4` 名字、上溯结果均正确（Q8 复核）。
-- [ ] **异步关**：含 `spawn` 的段落，主线 `thread` 的当前 sub 稳定为 `MainSubNN`（不被异步子脚本污染）。
+- [ ] **路过置值**：经过各段入口 sub 时当前段落被正确置值；段内其余 sub 不改变当前段落（no-op）。
+- [ ] **练习跳章后**：`thread+4` 名字与白名单置值均正确（Q8 复核）。
+- [ ] **异步落点**：含 `spawn`/async 落点的段落，async 子能否被观测到并置值。
 - [ ] 采样时机取**帧间稳定态**（IGI 渲染），避免表达式临时栈占用 `SP` 时误读。
 - [ ] **`ECLJump` 落点**：抽验 stage1 portion2/3（`0x7C3C`/`0x7CD8`）等跳转落点是否命中 `call MainSubNN`（`../exes/ecl_dump/th17/` 素材已在机，可离线核对落点；运行期仍待真机验）。
 
@@ -505,7 +492,7 @@ if (!section) section = "main";                         // ③ 兜底
 
 ## 11. 未定论 / 风险项
 
-1. **Q9 未经脚本级实测**：th17 本机不能运行、脚本结构未经实测（`.decl` 素材已在机，可离线补证）；(A) 结论基于“与 th15 同源同形 + VM 逐指令比对 + 现成 `mainLatterIDs` 用法”，属**静态强推断**，建议真机复核一次上溯行为。
+1. **入口表待枚举**：th17 本机不能运行；Q9 口径已订正为「路过式 checkpoint（latch）」，段落入口 sub 名单可从 `THStageWarp` 偏移 + `../exes/ecl_dump/th17/` 离线枚举（同 th16 做法），仍待真机复核置值行为。
 2. **`Edi` 是否主线**：`0x47A712` 对任意 thread 命中（§4.4）。若直接沿用现有钩子而不做宿主过滤，理论上可能读到异步/敌方子脚本的 sub。当前 thprac 用法靠 `subID==mainLatterIDs[stage]` + `bossExists` 间接规避。
 3. **`res+0xC` 的双重身份**：建表器把 `res+0xC+idx*4` 当“SCPT 块指针数组”写读，而 `GetMemAddr(0x4b76a0,0x17C,0xC)`（= `res+0xC`）又是 `ECLJump` 的写入基址。二者可能因 ECL 数据在 `res+0xC` 起**连续布局**而自洽（本机不能运行；`.decl` 素材已在机，可离线核对，未实证）。**不影响 Q1–Q9 其余结论**（表的地址链已由 `0x41ED6F`/`0x47AF5D`/`0x47AE40` 独立确证）。
 4. **地区/版本变体**：Steam/汉化版是否共用同一 RVA 需按变体实测。
@@ -516,5 +503,6 @@ if (!section) section = "main";                         // ③ 兜底
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-10-14 | 建档。静态反汇编 th17 ECL VM，回答 Q1–Q9：**Q1** `*(Edi+4)`=sub 索引（写点 `0x47AEDB/0x478B40/0x41D6C7/0x47ADB9`）；**Q2** `res=*(host+0x11F8)=*(*(u32*)0x4b76a0+0x17C)`、`table=*(res+0x8C)`、`count=*(res+8)`、项 8B（`+0`名/`+4`始），建表器 `0x47AEF0`、查表 `0x47AE40`；**Q3** 显式调用栈（`SP=thread+0x100C`、底 `thread+0xC`、帧 `0x10`、帧 `+0xC`=调用者、上限 `0x1000`、护栏 `0x478E1C`；`call 0x478D22`/`ret 0x478B0A`；spawn `0x47AD70` 另起线程）；**Q4** 主线宿主 spawn `0x431C58/0x431E83`（`call 0x41E140`，EAX=宿主），命中点 `Edi` 非必然主线；**Q5** 入口 `FUN_00478A70`、4B=`movss [edi],xmm1`、调用链 `0x47A940→0x478A70`；**Q6** 运行期保留名字；**Q7** `character=0x4B59F4`、`shotType=0x4B59F8`；**Q8** `ECLJump` 只写 `goto(0x0C)`，不改 sub；**Q9** 定案 **(A) 调用栈祖先法**。证据：`capstone` 反汇编 + th15 Ghidra 全量反编译对照。未真机三态。 |
+| 2026-10-14 | 建档。静态反汇编 th17 ECL VM，回答 Q1–Q9：**Q1** `*(Edi+4)`=sub 索引（写点 `0x47AEDB/0x478B40/0x41D6C7/0x47ADB9`）；**Q2** `res=*(host+0x11F8)=*(*(u32*)0x4b76a0+0x17C)`、`table=*(res+0x8C)`、`count=*(res+8)`、项 8B（`+0`名/`+4`始），建表器 `0x47AEF0`、查表 `0x47AE40`；**Q3** 显式调用栈（`SP=thread+0x100C`、底 `thread+0xC`、帧 `0x10`、帧 `+0xC`=调用者、上限 `0x1000`、护栏 `0x478E1C`；`call 0x478D22`/`ret 0x478B0A`；spawn `0x47AD70` 另起线程）；**Q4** 主线宿主 spawn `0x431C58/0x431E83`（`call 0x41E140`，EAX=宿主），命中点 `Edi` 非必然主线；**Q5** 入口 `FUN_00478A70`、4B=`movss [edi],xmm1`、调用链 `0x47A940→0x478A70`；**Q6** 运行期保留名字；**Q7** `character=0x4B59F4`、`shotType=0x4B59F8`；**Q8** `ECLJump` 只写 `goto(0x0C)`，不改 sub；**Q9** 定案 **(A) 调用栈祖先法**〔**后于 2026-10-15 订正为「路过式 checkpoint（latch）」**〕。证据：`capstone` 反汇编 + th15 Ghidra 全量反编译对照。未真机三态。 |
 | 2026-10-15 | 素材来源登记：`../exes/ecl/th17/`（`.ecl` 22 份）+ `../exes/ecl_dump/th17/`（`.decl` 22 份）已在机；据此把「无 `.ecl` 可供脚本级实测 / 本机无 `.ecl`」订正为「`.decl` 素材已在机，可离线补脚本级证据」。清单见 `docs/logger/decompile_materials.md`。 |
+| 2026-10-15 | **订正 Q9 口径**：由「(A) 调用栈祖先法」改为「**路过式 checkpoint（latch）**」——经过白名单函数即置值、不在表内 no-op（不回退 `main`）。原因：一个段落可能跨多个兄弟 `call`，不互为祖先，「整段驻留栈上」不成立 → 每 checkpoint 只需登记 1 个入口 sub（含 async）。§0 Q9 行、§9、§10、§11 同步改写。 |
