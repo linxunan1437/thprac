@@ -5,7 +5,7 @@
 > 术语口径（以此为准）：`docs/logger/logger_re_disasm_overview.md`
 > 白名单数据：`docs/logger/th16_checkpoints.csv`
 > 二进制指纹：`../exes/th16.exe`，**683520 B**，PE `TimeDateStamp = 1501534029`，`ImageBase = 0x400000`，`RELOCS_STRIPPED`（⇒ **RVA = VA − 0x400000**）
-> 代码：`thprac/src/thprac/thprac_th16_logger.{h,cpp}`、`thprac/src/thprac/thprac_th16_checkpoints_gen.cpp`（生成物）
+> 代码：`thprac/src/thprac/thprac_th16.cpp`（`TH16Logger` 模块；2026-10-16 由独立的 `thprac_th16_logger.{h,cpp}` 并入，见 §10）、`thprac/src/thprac/thprac_th16_checkpoints_gen.cpp`（生成物）
 > 脚本：`docs/logger/tools/gen_th16_checkpoints.py`（嵌入生成）、`docs/logger/tools/fill_th16_boss_rows.py`（boss 行回填）
 > 分支 / 提交：`lxn/game-logger`；`4dd7362`（boss 行回填）、`58745fe`（**beta** 功能）
 > 状态：**真机验证通过（除完整全关外）**。§7 / §7.1 清单已逐项跑过，仅剩全关测试；功能提交带 `beta:` 前缀。
@@ -25,7 +25,7 @@
 | 白名单进二进制 | 生成脚本 → raw string 嵌入 `.cpp`（生成物入库，不加 MSBuild 预构建步骤），运行期 rapidcsv 解析 |
 | 显示 | IGI 面板 miss/bomb 行下方新增一行；标签硬编码中文 `"当前段落"`（未动 `thprac_locale_def.*`） |
 | 开关 | 不新增高级选项，跟着 IGI（F9）走 |
-| 代码量 | 功能本身：2 个新文件 + `thprac_th16.cpp` 5 处（共 +8 行）；其余为管道/脚手架 |
+| 代码量 | 功能本身：`thprac_th16.cpp` 内的 `TH16Logger` 模块 + 4 处调用；独立新文件只有生成物 1 个；其余为管道/脚手架 |
 
 ---
 
@@ -45,7 +45,7 @@
   ├─ ④ 方案设计 ──────────────► 计划文件（宿主链遍历 / 白名单嵌入 / 生命周期）
   │                              过程中反汇编复核，订正「res 取法」一处（§4）
   │
-  ├─ ⑤ 编码 ─────────────────► 2 个新文件 + thprac_th16.cpp 5 处 + 工程登记
+  ├─ ⑤ 编码 ─────────────────► `TH16Logger` 模块并入 thprac_th16.cpp + 生成物 + 工程登记
   │                              脚本：gen_th16_checkpoints.py → 生成物
   │
   ├─ ⑥ 构建 ─────────────────► MSBuild Release|x86 通过
@@ -123,7 +123,7 @@
 
 ⇒ 每宿主的 `res` 只是**构造那一刻**对 `mgr+0x17C` 的快照，两者**不恒等**。boss 段加载的是另一份 ECL（`stNNbs`），若读全局 `mgr+0x17C`，boss 线程的 `subIdx` 会索引到**主线那张 sub 表** → 读出垃圾名字。
 
-按 `host+0x11F8` 取 res 与 `th16_ecl_re_report.md` §1 / `th16_boss_phase_report.md` §5.5 以及 th15 参照实现一致。代码见 `thprac_th16_logger.cpp:119`。
+按 `host+0x11F8` 取 res 与 `th16_ecl_re_report.md` §1 / `th16_boss_phase_report.md` §5.5 以及 th15 参照实现一致。代码见 `TH16Logger::Update()`（`thprac_th16.cpp:188-314`）。
 
 ---
 
@@ -147,15 +147,14 @@ name   = *(char**)(table + subIdx*8)     // 项 +0 = 名字 char*
 - **厂商同构佐证**：`FUN_00417580`（`0x417580`）的宿主链遍历与上表逐指令一致（`mov esi,[0x4a6dc0]` → `[esi+0x180]` → `mov ecx,[eax]` / `cmp [ecx+0x5740],edx` / `mov eax,[eax+4]`）；线程链遍历见 `FUN_004744E0`（`0x4744F0`）。
 - **线程链头节点的 `[0]` 就是主线线程**：`0x41A5A7 lea eax,[ecx+0x10]` → `0x41A63F mov [ecx+0x11fc],eax`。遍历线程链 = 主线 + async 全覆盖，且不依赖 `host+0xC`（后者在更新循环结束时被重置，帧边界语义不稳定）。
 
-### 5.2 新增文件
+### 5.2 文件落点
 
 | 文件 | 内容 |
 | --- | --- |
-| `thprac/src/thprac/thprac_th16_logger.h` | 单例 `TH16Logger`：`OnStageStart()` / `Update()` / `CurrentSection()`；`mEntries`（110 行）+ `mStageMap`（本关 `sub名 → 记录名`） |
-| `thprac/src/thprac/thprac_th16_logger.cpp` | 常量、`LoadCsv()`、`BuildStageMap()`、`Update()` 的链遍历 |
+| `thprac/src/thprac/thprac_th16.cpp` | 单例 `TH16Logger`：`OnStageStart()` / `Update()` / `CurrentSection()`；`mEntries`（110 行）+ `mStageMap`（本关 `sub名 → 记录名`）；常量、`LoadCsv()`、`BuildStageMap()`、`Update()` 的链遍历。落在 `enum addrs` 之后、`class TH16InGameInfo` 之前（`:24-314`）。<br>2026-10-16 前这里是独立文件 `thprac_th16_logger.{h,cpp}`；拆分无封装收益（唯一使用方就是本文件），故并入，并把重复的 `kStageNum` / `kEclMgrPtr` 改为直接复用 `enum addrs` 的 `STAGE_NUM` / `ENEMY_MANAGER_PTR`。 |
 | `thprac/src/thprac/thprac_th16_checkpoints_gen.cpp` | **生成物**：`THPrac::TH16::kTh16CheckpointsCsv[]`，raw string 内嵌 CSV |
 
-### 5.3 采样与安全校验（`thprac_th16_logger.cpp:84-146`）
+### 5.3 采样与安全校验（`TH16Logger::Update()`，`thprac_th16.cpp:188-314`）
 
 - `mgr` / `res` / `table` 逐级判空（菜单态、ECL 未加载时为 0）；
 - `count ∈ (0, 8192]` —— 这是挡住「`res` 被破坏」的**唯一哨兵**；
@@ -172,12 +171,12 @@ name   = *(char**)(table + subIdx*8)     // 项 +0 = 名字 char*
 
 ### 5.5 显示
 
-`TH16InGameInfo::OnContentUpdate()`（`thprac_th16.cpp:593` 起）在 bomb 行之后插入：
+`TH16InGameInfo::OnContentUpdate()`（`thprac_th16.cpp:892` 起）在 bomb 行之后插入：
 
 ```cpp
-ImGui::Text("当前段落");                                          // :614
+ImGui::Text("当前段落");                                          // :913
 ImGui::NextColumn();
-ImGui::Text("%s", TH16Logger::singleton().CurrentSection());      // :616
+ImGui::Text("%s", TH16Logger::singleton().CurrentSection());      // :915
 ImGui::NextColumn();
 ```
 
@@ -226,8 +225,7 @@ ImGui::NextColumn();
 
 | 文件 | 改动 |
 | --- | --- |
-| `thprac/src/thprac/thprac_th16_logger.{h,cpp}`（新建） | 监控模块全部实现 |
-| `thprac/src/thprac/thprac_th16.cpp` | `:3` include；`:614-617` 显示行；`:2718` 每帧采样；`:2756` 重置；`:2805` 预初始化（共 **+8 行**） |
+| `thprac/src/thprac/thprac_th16.cpp` | `TH16Logger` 模块全部实现（`:24-314`）；`:913-915` 显示行；`:3017` 每帧采样；`:3055` 重置；`:3104` 预初始化 |
 
 > ⚠ `th16_game_start` 的重置**必须写在既有 lambda 体内**：hook 框架对带回调的钩子用 INT3 + `vehHooks[addr] = this`（`thprac_hook.cpp:223`），**同址挂第二个钩子会覆盖第一个**，导致原有计数清零失效。
 
@@ -237,7 +235,7 @@ ImGui::NextColumn();
 | --- | --- |
 | `docs/logger/tools/gen_th16_checkpoints.py`（新建） | 从 CSV 生成嵌入 `.cpp`；幂等；断言正文不含分隔符 `)TH16CSV"`；自校验逐字节一致 |
 | `thprac/src/thprac/thprac_th16_checkpoints_gen.cpp`（生成物入库） | 见 §5.2 |
-| `thprac/thprac.vcxproj` / `.filters` | 登记 3 个新文件（+3 / +9 行） |
+| `thprac/thprac.vcxproj` / `.filters` | 登记 1 个新文件（`thprac_th16_checkpoints_gen.cpp`，+1 / +3 行） |
 
 ### 6.3 构建
 
@@ -271,7 +269,7 @@ ImGui::NextColumn();
 
 ### 7.1 中boss 窗口（beta2）追加清单
 
-**已真机验证通过**（含两个 flush 分支与卡死反例）。临时诊断行加在 `thprac_th16.cpp:614` 之前，验完**删除**：
+**已真机验证通过**（含两个 flush 分支与卡死反例）。临时诊断行加在 `thprac_th16.cpp:913` 之前，验完**删除**：
 
 ```cpp
 uintptr_t dbgMgr = GetMemContent(0x4A6DC0);
@@ -284,7 +282,7 @@ ImGui::Text("DBG mgr=%X slot0=%X stage=%d",
 3. **快杀 flush**：中boss 5s 内击破（`MainSub03` 尚未命中任何 checkpoint）→ 关窗时无值可补，显示维持 `ST1 MID1`，直到 `MainSub03` 命中后变 `ST1 后半 #1`。**2 与 3 是两个分支，都要跑。**
 4. **ST4 / ST5 关键反例**（`mainLatterIDs = {0,0,0,92,122,0,0}` 证明 MainLatter 与 boss 重叠的正是这两关）：同样验证 MID1 期间不被后半覆盖；ST5 顺带验 `BOSS2A/BOSS2B` 分支。
 5. **负例 A（warp 不得被吞）**：练习 warp 到 `ST1 后半 #1` → 应显示 `ST1 后半 #1`（窗口不得打开）；warp 到 `ST1 BOSS3` → `ST1 BOSS3`。
-6. **负例 B（卡死反例，最关键）**：打 ST1 中boss，战斗中暂停 → 练习菜单重开到 `ST1 前半 #1` → 之后 `前半 #1 → 后半 #1 → 后半 #2` 必须继续推进，**不得永远停在 `ST1 MID1`**。若出现一帧闪名（残留 `mPending` 在 warp 后首帧被 flush），兜底是 1 行：在 `thprac_th16.cpp:2567` 的 `th16_patch_main` lambda 顶部加 `TH16Logger::singleton().OnStageStart();`。
+6. **负例 B（卡死反例，最关键）**：打 ST1 中boss，战斗中暂停 → 练习菜单重开到 `ST1 前半 #1` → 之后 `前半 #1 → 后半 #1 → 后半 #2` 必须继续推进，**不得永远停在 `ST1 MID1`**。若出现一帧闪名（残留 `mPending` 在 warp 后首帧被 flush），兜底是 1 行：在 `thprac_th16.cpp:2866` 的 `th16_patch_main` lambda 顶部加 `TH16Logger::singleton().OnStageStart();`。
 7. **单调性回归**：整关值**只前进或不动，任何回退都是 bug**；段内非白名单 sub（`MainSub01`/`MainSub02`）运行期间值不得变。
 8. **关底回归**：中boss 打完后 `ST1 BOSS1..BOSS4` 与符卡 / 非符切换仍同步，整段不卡在 `MID1`。
 9. **ST2 复核**：`st02.decl` 的块序可疑（`@MainLatter()` 出现在死循环之后），对「中boss 命中先于章节命中」的依赖需真机确认。
@@ -304,7 +302,7 @@ ImGui::Text("DBG mgr=%X slot0=%X stage=%d",
 | 无关宿主撞名导致误 latch | 值跳到不相干段落 | 名字较专用，概率低；若出现，改为同时校验 `host+0x5740` 或宿主链位置 |
 | 英文 locale 中文渲染为空 | 切 EN 后空白 | **已知固有局限**：`thprac_gui_locale.cpp:444-467` 的 EN glyph range 不含 CJK，而 CSV 记录名本身就是中文；非本改动引入 |
 
-**回退粒度**：功能改动集中在「2 个新文件 + 生成物 + 脚本 + `thprac_th16.cpp` 5 处 + 工程登记」，`git revert 58745fe` 即可干净回退，不影响后续 JSON 落盘迭代。中boss 窗口（§5.7）只动 `thprac_th16_logger.{h,cpp}` 两个文件、不改数据与工程文件，单独 `git revert` 即可，与上面的 beta 提交互不影响。
+**回退粒度**：功能改动集中在「`thprac_th16.cpp` 内的 `TH16Logger` 模块 + 生成物 + 脚本 + 4 处调用 + 工程登记」，`git revert 58745fe` 即可干净回退，不影响后续 JSON 落盘迭代。**2026-10-16 模块并入 `thprac_th16.cpp` 后**，中boss 窗口（§5.7）不再能只 revert 两个独立文件——它与监控主体同处一个 TU，回退需按提交（`58745fe` / 中boss 修复提交）整笔回退。
 
 **中boss 窗口的残余风险**：死亡 sub 名若漏了变体（如 `MMBossCard3_at2` 这类笔误），窗口不关 ⇒ 本章后半 checkpoint 被吞；`bossHit`（关底boss 命中）会强制关窗，最坏只吞「中boss→关底」这一段。§7.1.10 的诊断行能直接看到真实 sub 名，据此补 `IsMidBossEndSub` 前缀。
 
@@ -324,5 +322,6 @@ ImGui::Text("DBG mgr=%X slot0=%X stage=%d",
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-10-16 | **结构整理：`TH16Logger` 并入 `thprac_th16.cpp`**（3 文件 → 2）。动机：`.h`/`.cpp` 拆分无封装收益（唯一使用方就是 `thprac_th16.cpp` 那 4 个调用点），且与仓库「一作一 cpp、无 per-game 头」的惯例不符；拆分还逼出与 `enum addrs` 重复的 `kStageNum`/`kEclMgrPtr`。做法：模块代码落在 `enum addrs` 之后、`class TH16InGameInfo` 之前（`:24-314`），地址常量改为直接复用 `enum addrs` 的 `STAGE_NUM`/`ENEMY_MANAGER_PTR`；删除 `thprac_th16_logger.{h,cpp}`，`.vcxproj` / `.filters` 各删 2 条登记。生成物 `thprac_th16_checkpoints_gen.cpp` 保持独立 TU（AUTO-GENERATED，故是 3→2 而非 3→1）。4 个调用点与 `th16_game_start` 的「重置必须写在既有 lambda 内」约束均未动。代价：`thprac_th16.cpp` 2843 → 3142 行；本文所有 `thprac_th16.cpp:NNN` 引用整体 +299。**状态：编译通过（Release\|x86），真机回归待跑。** |
 | 2026-10-16 | **beta2：修「中boss 增援章节」误报**（§5.7）。真机反馈：很多关卡「后半第一节」的 checkpoint 实为增援章节，中boss 出场后立刻开跑，面板在中boss 还活着时就从 `STn MID1` 跳到 `STn 后半 #1`。静态根因：`st01.decl:1525-1531` 的 `main()` 在 `enmCreateA("MBoss",…)` 后 `wait(160)` 就 `@MainLatter()`；`st01mbs.decl` 的 `MBoss()` 在 `@MBoss1()`（call）后整场战不再有白名单命中，于是主线程的 `MainSub03` 胜出。修法：新增 `mPending`/`mMidBossActive`/`mMidBossDone`，`Update()` 改为「先遍历收集、再统一裁决」——按白名单键前缀分「中boss/关底boss/章节」，中boss 存活期间章节 checkpoint 只缓存，当前 sub 名命中死亡 sub 前缀（`MBossDead` 等 5 个，精确前缀，避开 `MBossCard1_Dead`）时关窗并补显示。仅动 `thprac_th16_logger.{h,cpp}`，无新钩子、无新反编译、不改数据。**状态：真机验证通过（除完整全关外）**，仅剩全关测试。 |
 | 2026-10-16 | **建档**。落盘 TH16 ECL 段落监控的实施记录（beta）。开发流程：需求 → 逆向调研（`th16_ecl_re_report.md` / `th16_boss_phase_report.md`）→ 选型（采用方案二）→ 数据准备（回填 CSV 的 71 行 boss 行，`ST4 MID2` 删除，72→71）→ 设计（反汇编复核**订正 `res` 取法**：按宿主读 `host+0x11F8`，不用全局 `mgr+0x17C`）→ 编码（新增 `thprac_th16_logger.{h,cpp}` + 生成物 `thprac_th16_checkpoints_gen.cpp` + 脚本 `gen_th16_checkpoints.py`，`thprac_th16.cpp` 5 处共 +8 行，工程登记）→ 构建（Release\|x86 通过；途中修 `LNK1104` 输出占用、`LNK2001` 生成物缺命名空间）→ 提交（`4dd7362` 数据、`58745fe` 功能带 `beta:`）。核心机制：`th16_update` 每帧遍历 `mgr+0x180` 宿主链 × `host+0x11FC` 线程链，按每宿主 `host+0x11F8` 取 res，命中白名单即 latch、未命中 no-op、首命中前 `main`；不缓存任何指针。**状态：编译通过，未真机验证**（§7 清单待跑）。 |
