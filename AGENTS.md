@@ -50,6 +50,7 @@
 
 - 需求：`docs/req_logger.md`
 - 总括（先读）：`docs/logger/logger_re_disasm_overview.md`
+- 进度监控（活文档）：`docs/logger/logger_progress.md`
 - 反编译素材清单与来源：`docs/logger/decompile_materials.md`
 
 **工作流与工具**

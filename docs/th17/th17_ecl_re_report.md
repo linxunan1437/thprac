@@ -496,6 +496,7 @@ if (section) current = section;               // 未命中 → no-op（保持 cu
 2. **`Edi` 是否主线**：`0x47A712` 对任意 thread 命中（§4.4）。若直接沿用现有钩子而不做宿主过滤，理论上可能读到异步/敌方子脚本的 sub。当前 thprac 用法靠 `subID==mainLatterIDs[stage]` + `bossExists` 间接规避。
 3. **`res+0xC` 的双重身份**：建表器把 `res+0xC+idx*4` 当“SCPT 块指针数组”写读，而 `GetMemAddr(0x4b76a0,0x17C,0xC)`（= `res+0xC`）又是 `ECLJump` 的写入基址。二者可能因 ECL 数据在 `res+0xC` 起**连续布局**而自洽（本机不能运行；`.decl` 素材已在机，可离线核对，未实证）。**不影响 Q1–Q9 其余结论**（表的地址链已由 `0x41ED6F`/`0x47AF5D`/`0x47AE40` 独立确证）。
 4. **地区/版本变体**：Steam/汉化版是否共用同一 RVA 需按变体实测。
+5. **boss 段（方案二）**：boss ECL 跑在 **boss 敌人自己的宿主**里，须先取 boss 宿主（本作取法：`mgr+0x48` 槽→id 表 + `mgr+0x180` 宿主链 + `host+0x5760` id；游戏自身「取当前 boss」函数 `FUN_0041A5C0`）。详见 **`docs/th17/th17_boss_phase_report.md`**（boss 段方案二逆向报告）。
 
 ---
 
@@ -506,3 +507,4 @@ if (section) current = section;               // 未命中 → no-op（保持 cu
 | 2026-10-14 | 建档。静态反汇编 th17 ECL VM，回答 Q1–Q9：**Q1** `*(Edi+4)`=sub 索引（写点 `0x47AEDB/0x478B40/0x41D6C7/0x47ADB9`）；**Q2** `res=*(host+0x11F8)=*(*(u32*)0x4b76a0+0x17C)`、`table=*(res+0x8C)`、`count=*(res+8)`、项 8B（`+0`名/`+4`始），建表器 `0x47AEF0`、查表 `0x47AE40`；**Q3** 显式调用栈（`SP=thread+0x100C`、底 `thread+0xC`、帧 `0x10`、帧 `+0xC`=调用者、上限 `0x1000`、护栏 `0x478E1C`；`call 0x478D22`/`ret 0x478B0A`；spawn `0x47AD70` 另起线程）；**Q4** 主线宿主 spawn `0x431C58/0x431E83`（`call 0x41E140`，EAX=宿主），命中点 `Edi` 非必然主线；**Q5** 入口 `FUN_00478A70`、4B=`movss [edi],xmm1`、调用链 `0x47A940→0x478A70`；**Q6** 运行期保留名字；**Q7** `character=0x4B59F4`、`shotType=0x4B59F8`；**Q8** `ECLJump` 只写 `goto(0x0C)`，不改 sub；**Q9** 定案 **(A) 调用栈祖先法**〔**后于 2026-10-15 订正为「路过式 checkpoint（latch）」**〕。证据：`capstone` 反汇编 + th15 Ghidra 全量反编译对照。未真机三态。 |
 | 2026-10-15 | 素材来源登记：`../exes/ecl/th17/`（`.ecl` 22 份）+ `../exes/ecl_dump/th17/`（`.decl` 22 份）已在机；据此把「无 `.ecl` 可供脚本级实测 / 本机无 `.ecl`」订正为「`.decl` 素材已在机，可离线补脚本级证据」。清单见 `docs/logger/decompile_materials.md`。 |
 | 2026-10-15 | **订正 Q9 口径**：由「(A) 调用栈祖先法」改为「**路过式 checkpoint（latch）**」——经过白名单函数即置值、不在表内 no-op（不回退 `main`）。原因：一个段落可能跨多个兄弟 `call`，不互为祖先，「整段驻留栈上」不成立 → 每 checkpoint 只需登记 1 个入口 sub（含 async）。§0 Q9 行、§9、§10、§11 同步改写。 |
+| 2026-10-16 | **新增 boss 段（方案二）交叉引用**：boss ECL 跑在 boss 敌人自己的宿主里；本作取法（`mgr+0x48` 槽→id 表 / `mgr+0x180` 宿主链 / `host+0x5760` id / `FUN_0041A5C0`）+ 当前 sub 名链复核 + `docs/logger/th17_checkpoints.csv` boss 行回填，**已单独立档** → `docs/th17/th17_boss_phase_report.md`。§11 追加第 5 项。**订正**：§4.1 把 `+0x48` 记入 host 字段表的说法应更正为「属管理器 `mgr`（`mgr+0x48` = 槽→id 表）」。正文 Q1–Q9 结论不变。 |

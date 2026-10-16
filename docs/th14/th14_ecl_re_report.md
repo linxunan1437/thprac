@@ -504,6 +504,10 @@ if (section) current = section;                // 未命中 → no-op（不回�
 
 ---
 
+> **boss 段续篇（方案二）**：TH14 **boss 段监控**（读 boss 宿主 ECL 当前 sub 名 + 白名单 latch）**已单独立档** → `docs/th14/th14_boss_phase_report.md`。要点：boss 宿主 = `*(u32*)(*(u32*)0x4DB544 + 0x5C + slot*4)`（槽表直接存宿主指针，`FUN_0041C050` 按槽取；`FUN_00421AA0` 按 id）、boss 门控 = `[host+0x5244] & 0x800000`（ECL `setBoss` opcode `0x200` 置/清）、当前 sub 沿用本文 §1/§10.3 的「`host→node→ip→res→sub 表` + ip→sub 区间映射」。本文 Q1–Q9 结论不变。
+
+---
+
 ## 13. 变更记录
 
 | 日期 | 变更 |
@@ -511,3 +515,4 @@ if (section) current = section;                // 未命中 → no-op（不回�
 | 2026-10-14 | 建档。静态定案 **Q1 = (b) `[Edi+4]` 为当前指令指针（绝对 VA），非 sub 索引**（`Edi`=脚本节点；`+4` 由 `0x483C28` 指令长度推进、被解引用为指令；thprac 注释正确、编排者 (a) 假设证伪）；**Q2 确认**（加载器 `0x4846A0`：`+0`=名字 `char*`、`+4`=sub 数据绝对地址、`res+8`=计数；按名解析 `0x4848B0` 返回 `+4`+0x10）；**Q3 确认有显式调用栈**（`SP=node+0x1008`、栈底 `node+8`、帧 `0x10`、`call 0x0B` 压 / `ret 0x0A` 弹；**帧内无 sub 索引，祖先为返回 ip**，与 th15 的关键差异）；**Q4** 宿主=`node+0x1014`/`host+0x11CC`=res，写入点候选 `0x45883E`(+`0x484940`)；**Q5** 命中点在 `0x482380` 每节点步进器（由 `0x483E70` 每帧迭代）；**Q6** 运行期保留名字；**Q8** `ECLJump` 仅写 `goto 0x0C`，`0x4825D7` 只改 `node+0`/`node+4`；**Q9 定案为 (A) 调用栈祖先法**〔**后于 2026-10-15 订正为「路过式 checkpoint（latch）」**〕（须补 ip→sub 映射，给出「按地址排序表」与「影子名栈」两方案）。证据：`capstone` 反汇编 + th15 模板对照。**未真机。** |
 | 2026-10-15 | 素材来源登记：`../exes/ecl/th14/`（`.ecl` 24 份）+ `../exes/ecl_dump/th14/`（`.decl` 24 份）已在机；据此把「th14 无离线 `.ecl`」订正为「`.decl` 素材已在机，可离线补脚本级证据」。清单见 `docs/logger/decompile_materials.md`。 |
 | 2026-10-15 | **订正 Q9 口径**：由「(A) 调用栈祖先法」改为「**路过式 checkpoint（latch）**」——经过白名单函数即置值、不在表内 no-op（不回退 `main`）。原因：一个段落可能跨多个兄弟 `call`，不互为祖先，「整段驻留栈上」不成立 → 每 checkpoint 只需登记 1 个入口 sub（含 async）；仍需保留「ip→sub」映射层。§0 Q9 行、§10、§11 同步改写。 |
+| 2026-10-16 | **新增 boss 段监控（方案二）交叉引用**：本文末尾追加指向 `docs/th14/th14_boss_phase_report.md`（TH14 boss 宿主取法 `mgr+0x5C` / boss 门控 `host+0x5244` bit23 / 当前 sub 链 / boss 行回填 64/72 行）。本次仅追加交叉引用与变更记录，正文 Q1–Q9 结论不变。 |
