@@ -5,7 +5,8 @@
 > 逐作需求：`docs/<作>/<作>_ecl_re_requests.md`（th10 ~ th18）。
 > 反编译素材清单与来源：`docs/logger/decompile_materials.md`。
 > 文档类型：**逆向需求文档（requests）**。§5 的“结论/状态”列由后续逆向迭代回填。
-> 本机为 macOS（Darwin/arm64），无法编译、无法真机运行；`../exes/th10.exe ~ th18.exe`、`../exes/ecl/`（原始 `.ecl`）、`../exes/ecl_dump/`（`thecl -d` 反编译 `.decl`）已在本机，`capstone 5.0.7` + `pefile` 可用（供后续只读静态反汇编 / 离线 ECL 解码）。
+> 本机为 **Windows 11**（可编译、可真机运行；`docs/gametime/` 那套已在真机跑过）。`../exes/th10.exe ~ th18.exe`、`../exes/ecl/`（原始 `.ecl`）、`../exes/ecl_dump/`（`thecl -d` 反编译 `.decl`）已在本机，`capstone 5.0.7` + `pefile` 可用（供只读静态反汇编 / 离线 ECL 解码）。
+> ⚠️ **A 代（th06–th08）没有 `.ecl`/`.decl` 素材，也没有 eclmap**（THTK `MAP/` 只有 `ECL_MAP_08.txt` 及以后）—— 见 §4、`docs/logger/decompile_materials.md`。
 
 ---
 
@@ -22,7 +23,7 @@
 
 > **最终目的**：实时显示**当前段落**。CSV 里每个 checkpoint 都**指向一个段落的开头**；“读取当前 ECL 函数(sub)”只是判定“现在到了哪个段落”的手段。日志迭代里的“启动/最后/经过的 checkpoint”全部是**段落级**。
 
-- 覆盖作品：**th10 ~ th18**（9 作整数作）。th06–09 / th095 留待下一批。
+- 覆盖作品：**th10 ~ th18**（9 作整数作，逆向进行中）。**th06–th08（A 代）已于 2026-10-16 完成 E0 建档**（`docs/th06|th07|th08/thXX_ecl_re_requests.md`），逆向待做；th09 需求明确不支持、th095 不在范围。
 - 本机不能编译验证，故本文档只定义“需要逆向到什么 + 期望的产出格式”，**不写实现代码**。
 - 所有地址一律按 **RVA = 绝对 VA − 0x400000** 表述；th10–18 均 `ImageBase = 0x400000` 且 `RELOCS_STRIPPED`（不重定位），故 RVA 与 VA 可直接换算。
 
@@ -129,14 +130,16 @@ if (section) cache = section;                               // 命中 → 置值
 
 | 代 | 作品 | 参照作 | sub 表/索引形态 |
 | --- | --- | --- | --- |
-| A | th06–th09, th095 | th06 | 第一代引擎，本轮不做 |
+| A | th06–th09, th095 | th06 | 第一代引擎；**th06–th08 已 E0 建档**（2026-10-16），逆向待做。**章节跳转＝时间轴**（非 sub 跳转），见下注 |
 | **B** | th10, th11, th12, th13, th125, th128 | **th10 / th11**（已有 ECL 解释器命中点） | 执行对象 + 时间字段 + 主线判据已知；sub 表/名字待定 |
 | **C** | th14, th15, th16, th17, th18, th143, th165, th185 | **th15**（sub 名读取已完整） | “宿主→线程→subIdx→sub 表”模板成立 |
 | D | th19, th20 | — | 会重定位，需 base+RVA，本轮不做 |
 
+> **A 代（th06–th08）的特殊性**：与 B/C 代不同，A 代的章节跳转是往引擎里写**时间值**，不是 `ECLJump` 跳到具名 sub —— th06 `ECLWarp(time)`→`0x5a5fb0`、th07 `ECLTimeWarp(count,time)`→`[0x9a9af8+0x9545fc]`、th08 `ECLWarp(time,offset,…)`→`0xf54cf8`（Timeline 结构 `0xF54CF0`）。因此 A 代各作 requests 的 **Q1 改为「sub 索引 / 时间值 / 指令偏移」三选一**，checkpoint「入口」列改用**时间值 / 指令偏移**。另：A 代 ECL 格式里**确实有带 id 的 sub**（th07 `ECLCallSub` opcode `0x29`、th08 opcode `0x34`、th06 有未接线的 `EclRawInstrCallArgs.eclSub`），运行时是否暴露「当前 sub」是待逆向项。
+
 **同构搬运**：先在参照作把 Q1–Q4 摸透，再在同代内按“相同对象形态 + 相对偏移”搬运，逐作验证。
 
-**分支关**（需求文档点名）：th11 st4、th14 st4、th16 st5 存在剧情/路线分支。因为监控读的是**运行期状态**（当前执行到哪个 sub → 当前段落），而非静态时间轴，理论上天然兼容分支；但需在真机验证（§6 Q8/Q9 / 各作验证清单）。
+**分支关**（需求文档点名）：th11 st4、th14 st4、th16 st5 存在剧情/路线分支；**A 代三作（th06 / th07 / th08）的 st4 也均有路线分支**。因为监控读的是**运行期状态**（当前执行到哪个 sub/位置 → 当前段落），而非静态时间轴，理论上天然兼容分支；但需在真机验证（§6 Q8/Q9 / 各作验证清单）。
 
 ---
 
@@ -149,6 +152,9 @@ if (section) cache = section;                               // 命中 → 置值
 
 | 作 | 代 | 二进制 / ECL 与 decl（../exes） | 已有 ECL 解释器命中点（寄存器） | 命中点已知字段 | ECL 数据区链（THSectionPatch `SetBaseAddr` 来源） | sub 名/索引线索 |
 | --- | --- | --- | --- | --- | --- | --- |
+| th06 | A | th06.exe 512000B ts=1038721275（**无 ecl/decl**） | 时间轴 `0x41188A`/`0x411669`(各 3B)；冻结 `0x412e31`(5B) | 命中时从 `pCtx->Ebp-0x14`/`-0xC` 取**当前指令指针** | `SetBaseAddr(0x487e50)` | ❌ 无 eclmap；`EclRawInstrCallArgs.eclSub`（未接线） |
+| th07 | A | th07.exe 650752B ts=1066942337（**无 ecl/decl**） | 冻结 `0x4207a1`(5B)；opcode 分支 `0x42D17E`/`0x414FE6`/`0x413D06`/`0x41FFD5` | — | `SetBaseAddr(GetMemAddr(0x1347938))` | ❌ 无 eclmap；`ECLCallSub` opcode `0x29` |
+| th08 | A | th08.exe 840704B ts=1095610188（**无 ecl/decl**） | ❌ 无冻结 hook；opcode 分支 `0x437AF3`/`0x41CB32`/`0x41C44F`/`0x42F34D` | Timeline 结构 `0xF54CF0`；ECL Buffer `0x4ECCB8` | `SetBaseAddr(GetMemAddr(0x4ECCB8))` | ❌ 无 eclmap；`ECLCallSub` opcode `0x34` |
 | th10 | B | th10.exe 487936B ts=1186086096 | `0x44fb9f`(2B) `Esi` | `*(f32)Esi`=当前时间；主线 `[Esi+0x1014]+0x103c+0x1444==1296` | `GetMemAddr(0x477704, 0x54, 0xC)` | ❌ |
 | th11 | B | th11.exe 688128B ts=1217734394 | `0x45d2a3`(2B) `Edi` | `*(f32)Edi`=当前时间；主线 `[Edi+0x1014]+0x103c+0x1580==20512` | `GetMemAddr(0x4a8d7c, 0x64, 0xC)` | ❌ |
 | th12 | B | th12.exe 737280B ts=1251344348 | ❌ | — | `GetMemAddr(0x4b43dc, 0x64, 0xC)` | ❌ |
@@ -161,6 +167,7 @@ if (section) cache = section;                               // 命中 → 置值
 
 > 二进制同一性：以上 ts 与 `thprac/src/thprac/thprac_launcher_games_def.h` 的识别表一致；均 `ImageBase=0x400000`、`RELOCS_STRIPPED`。
 > **ECL / decl 素材**：th10–th18 的原始 `.ecl`（`../exes/ecl/thXX/`）与 `thecl -d` 反编译 `.decl`（`../exes/ecl_dump/thXX/`）均已在机（各作 8/20/9/21/24/23/22/22/22，共 171 份，dump 171/171 成功），可离线枚举各关段落入口 sub；清单与来源见 `docs/logger/decompile_materials.md`。
+> **A 代（th06–th08）例外**：**无 eclmap**（THTK `MAP/` 只有 `ECL_MAP_08.txt` 及以后），`.ecl` 未从 `.dat` 解出，`reasm/exes/` 缺 `th06.exe` ⇒ **离线具名枚举这条路对 A 代不通**；checkpoint「入口」列口径改用**时间值 / 指令偏移**。详见 `docs/th06|th07|th08/thXX_ecl_re_requests.md` §12。
 > **需静态厘清的首要矛盾**：`[执行对象+4]` 到底是“sub 索引”还是“指令指针”。th15 证实 `thread+4`=**索引**；th16/17/18 当索引用；th14 却当“指令指针”做区间比较。若 th14 的 `Edi` 即 thread，则 th14 现有注释有误。
 > **读到的 sub → 当前段落**：本表各作的 sub/索引结论，需再经白名单映射为“段落入口”，最终显示**当前段落**（见 §1.2、§2.1、§6 Q9）。
 
@@ -289,3 +296,4 @@ if (section) cache = section;                               // 命中 → 置值
 | 2026-10-15 | **登记反编译素材来源**：新增 `docs/logger/decompile_materials.md`（`../exes` 的 exe / ecl / decl 与 `../th15decode/` 的来源、清单、生成链、复核方式）；文档头与 §5.1 表头、注记同步指向该清单，明确 th10–18 各作 `.ecl`/`.decl` 已在机、可离线枚举段落入口。 |
 | 2026-10-15 | **订正 Q9 判定口径**：原「(A) 调用栈祖先法」与段内脚本结构不符——段内多个 `MainSubNN` 是 `MainFront`/`MainLatter` 的**兄弟 `call`**，彼此不互为祖先，「整段驻留栈上」不成立。改为**路过式 checkpoint（latch）**：经过表内函数即置值、不在表内 no-op（**不回退 `main`**）。据此**每个 checkpoint 只登记 1 个段落入口函数**（= warp 落点所进入的 sub，含 `async`）。“函数栈存在”仍是事实（Q3），但不参与判定。§0/§1.2/§2/§2.1/§6 Q9/§9 同步改写。 |
 | 2026-10-16 | **回填 boss 段（方案二）总表**：新增 §5.3「boss 段（方案二）逐作锚点」（th14–th18 的管理器全局 / 槽表 / 宿主链 / 按槽·按 id 取 host 函数 / host id / boss 门控位）；新建逐作报告 `docs/th{14,15,17,18}/thXX_boss_phase_report.md`（th16 已有），并回填各作 `docs/logger/thXX_checkpoints.csv` 的 boss 行（th14 64、th15 10、th17 63、th18 65）。**关键订正**：th15 `../th15decode/boss-phase-hook.md` 的 `host=*(E+0x44B8)` 有误（`mgr+0x180` 链上对象 `E` **本身即 host**；游戏自身「当前 boss」查询应为 `FUN_0041F7F0` 而非 `0x48F7F0`）；th17 报告 §4.1 的 `+0x48` 属管理器 `mgr`（`mgr+0x48` = 槽→id 表）、非 host 字段。状态：静态调研（🟡 未真机三态）。 |
+| 2026-10-16 | **A 代（th06–th08）E0 建档**：§0 范围改写；§4 分代表 A 代行 + A 代特殊性注记（**章节跳转＝时间轴**，非 sub 跳转；Q1 改为「sub 索引 / 时间值 / 指令偏移」三选一）；**§5.1 新增 th06–th08 三行** + A 代「无 eclmap / 无 ecl 素材」例外注记。**纠错**：文档头与 §5 原写「本机为 macOS、无法编译/真机」为**误**，改为 Windows 11（`docs/gametime/` 已在真机跑过）。逐作文档：`docs/th06|th07|th08/thXX_ecl_re_requests.md`。 |

@@ -17,7 +17,7 @@
 | dump 汇总 | `../exes/ecl_dump/_dump_report.txt` | 逐作「期望/实际/失败」 | `dump_ecl_decl.ps1` 产出 | 171/171 成功 |
 
 - **`ecl/` 与 `ecl_dump/` 是同一批脚本的两面**：`ecl/thXX/*.ecl` 是**原始二进制**，`ecl_dump/thXX/*.decl` 是其**反编译文本**（sub 名、`@call` 结构等）。
-- th07 / th08 **只有 exe、没有 ecl**（第一代引擎，本轮不在 ECL 监控范围内）。
+- **A 代（th06–th08）素材现状**：th07 / th08 **只有 exe、没有 ecl**；**th06 连 exe 都没有**（本体在 `D:\C P\C2H2\[th06]\東方紅魔郷.exe`，512000 B / `ts=1038721275`，与 `thprac_launcher_games_def.h` 识别表一致，**尚未复制进 `../exes/`**）。三作均**无 eclmap**（THTK `MAP/` 只有 `ECL_MAP_08.txt` 及以后）⇒ **A 代无法离线枚举具名 sub**。A 代已于 2026-10-16 完成 **E0 建档**：`docs/th06|th07|th08/thXX_ecl_re_requests.md`。
 
 ---
 
@@ -57,6 +57,7 @@
 - 全部 `ImageBase = 0x400000`、`RELOCS_STRIPPED`（不重定位）⇒ **`RVA = VA − 0x400000`**。
 - **同一性背书**：上表 th10–th18 的尺寸 / `TimeDateStamp` 与 `thprac/src/thprac/thprac_launcher_games_def.h` 各作 ORIGINAL 条目一致；th07 / th08 另有 sha256 与官方安装逐字节比对记录（见 `docs/th07/`、`docs/th08/` 报告头部）。
 - 各篇 `docs/thXX/thXX_re_disasm_report.md` / `thXX_ecl_re_report.md` 头部引用的 `../exes/thXX.exe` 即本目录。
+- **A 代缺 `th06.exe`**：上表无 th06 —— 本体在 `D:\C P\C2H2\[th06]\東方紅魔郷.exe`（512000 B，`TimeDateStamp = 1038721275`，`SizeOfCode = 430080`），指纹与 `thprac_launcher_games_def.h:953` 识别表一致，**尚未入库**（属「素材补齐」，见 `docs/th06/th06_ecl_re_requests.md` §12）。
 
 ---
 
@@ -162,3 +163,4 @@ th15 作为**参照作**，另有一条**独立素材来源**（相对 `thprac/`
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-15 | 建档。登记 `../exes` 下的 exe / ecl / decl 与 `../th15decode/` 的来源、清单、生成链与复核方式；作为各篇 `thXX_ecl_re_report.md` 的素材来源统一出处。 |
+| 2026-10-16 | **补记 A 代（th06–th08）素材缺口**：§0/§2 注明 th06 **无 exe**（本体在 `D:\C P\C2H2\[th06]\東方紅魔郷.exe`，指纹已实测一致、尚未入库）、三作**无 eclmap**（THTK `MAP/` 无 `ECL_MAP_06/07.txt`）、`.ecl` 未从 `.dat` 解出 ⇒ **A 代无法离线枚举具名 sub**。A 代已 E0 建档（`docs/th06\|th07\|th08/thXX_ecl_re_requests.md`）。 |
