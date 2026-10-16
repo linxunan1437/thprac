@@ -8,7 +8,7 @@
 > 代码：`thprac/src/thprac/thprac_th16_logger.{h,cpp}`、`thprac/src/thprac/thprac_th16_checkpoints_gen.cpp`（生成物）
 > 脚本：`docs/logger/tools/gen_th16_checkpoints.py`（嵌入生成）、`docs/logger/tools/fill_th16_boss_rows.py`（boss 行回填）
 > 分支 / 提交：`lxn/game-logger`；`4dd7362`（boss 行回填）、`58745fe`（**beta** 功能）
-> 状态：**编译通过（Release|x86），未真机验证**。所有运行期行为待实测，故功能提交带 `beta:` 前缀。
+> 状态：**真机验证通过（除完整全关外）**。§7 / §7.1 清单已逐项跑过，仅剩全关测试；功能提交带 `beta:` 前缀。
 > 地址口径：正文以 **VA** 为主。**本机为 Windows**（VS 在 `D:\tools\VS`），与本文其他 `docs/th16/` 文档里「本机 macOS 不可编译」的旧描述不符——以本文为准。
 
 ---
@@ -53,7 +53,7 @@
   │
   └─ ⑦ 提交（beta）──────────► 58745fe，标 `beta:` 表示未真机验证
        │
-       └─ ⑧ 待办：真机三态验证（§7）
+       └─ ⑧ 真机三态验证（§7 / §7.1）──► ✅ 除完整全关外全部通过
 ```
 
 ### 1.1 每一步的产出与判定
@@ -192,7 +192,7 @@ ImGui::NextColumn();
 | 退出一局（`PLAYER_PTR == 0`） | **故意不重置**（需求要求保留最后 checkpoint；IGI 此时本就不绘制） |
 | 菜单 / 非关卡态 | `STAGE_NUM ∉ {1..7, 9}` 直接 return，不改状态 |
 
-> `STAGE_NUM`（`0x4A5790`）换算：`STn → n`（1..7，7 = Extra）；`9` 防御性地当 7。此换算标 🟡，待真机用临时诊断行确认。
+> `STAGE_NUM`（`0x4A5790`）换算：`STn → n`（1..7，7 = Extra）；`9` 防御性地当 7。此换算**已真机确认**（§7.7 的临时诊断行）。
 
 ### 5.7 中boss 窗口（beta2，修「增援章节」误报）
 
@@ -256,9 +256,9 @@ ImGui::NextColumn();
 
 ---
 
-## 7. 待办：真机验证清单
+## 7. 真机验证清单（已通过，除完整全关）
 
-**代码只到「编译通过」，运行期行为全部未验。** 按下列顺序实测（本机 Windows 可编译可跑）：
+**已真机验证通过（除完整全关外）**，下列各项均已实测通过（本机 Windows 可编译可跑）：
 
 1. **latch 正确性（道中）**：进 ST1 从头打，F9 开 IGI。title 卡时应为 `main`；随进度依次 `ST1 前半 #1 → 前半 #2 → 后半 #1 → 后半 #2`。
 2. **未命中 no-op（关键反例）**：`ST1 前半 #1` 置值后，段内非白名单 sub（`MainSub01`/`MainSub02`）运行期间值**必须不变**，不得回退 `main`；`MainLatter` 期间停在 `ST1 后半 #2`。判定：整段值只单调前进或不动，**任何回退都是 bug**。
@@ -271,7 +271,7 @@ ImGui::NextColumn();
 
 ### 7.1 中boss 窗口（beta2）追加清单
 
-同样只到「编译通过」，运行期未验。临时诊断行加在 `thprac_th16.cpp:614` 之前，验完**删除**：
+**已真机验证通过**（含两个 flush 分支与卡死反例）。临时诊断行加在 `thprac_th16.cpp:614` 之前，验完**删除**：
 
 ```cpp
 uintptr_t dbgMgr = GetMemContent(0x4A6DC0);
@@ -324,5 +324,5 @@ ImGui::Text("DBG mgr=%X slot0=%X stage=%d",
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-10-16 | **beta2：修「中boss 增援章节」误报**（§5.7）。真机反馈：很多关卡「后半第一节」的 checkpoint 实为增援章节，中boss 出场后立刻开跑，面板在中boss 还活着时就从 `STn MID1` 跳到 `STn 后半 #1`。静态根因：`st01.decl:1525-1531` 的 `main()` 在 `enmCreateA("MBoss",…)` 后 `wait(160)` 就 `@MainLatter()`；`st01mbs.decl` 的 `MBoss()` 在 `@MBoss1()`（call）后整场战不再有白名单命中，于是主线程的 `MainSub03` 胜出。修法：新增 `mPending`/`mMidBossActive`/`mMidBossDone`，`Update()` 改为「先遍历收集、再统一裁决」——按白名单键前缀分「中boss/关底boss/章节」，中boss 存活期间章节 checkpoint 只缓存，当前 sub 名命中死亡 sub 前缀（`MBossDead` 等 5 个，精确前缀，避开 `MBossCard1_Dead`）时关窗并补显示。仅动 `thprac_th16_logger.{h,cpp}`，无新钩子、无新反编译、不改数据。**状态：编译通过，未真机验证**（§7.1 清单待跑）。 |
+| 2026-10-16 | **beta2：修「中boss 增援章节」误报**（§5.7）。真机反馈：很多关卡「后半第一节」的 checkpoint 实为增援章节，中boss 出场后立刻开跑，面板在中boss 还活着时就从 `STn MID1` 跳到 `STn 后半 #1`。静态根因：`st01.decl:1525-1531` 的 `main()` 在 `enmCreateA("MBoss",…)` 后 `wait(160)` 就 `@MainLatter()`；`st01mbs.decl` 的 `MBoss()` 在 `@MBoss1()`（call）后整场战不再有白名单命中，于是主线程的 `MainSub03` 胜出。修法：新增 `mPending`/`mMidBossActive`/`mMidBossDone`，`Update()` 改为「先遍历收集、再统一裁决」——按白名单键前缀分「中boss/关底boss/章节」，中boss 存活期间章节 checkpoint 只缓存，当前 sub 名命中死亡 sub 前缀（`MBossDead` 等 5 个，精确前缀，避开 `MBossCard1_Dead`）时关窗并补显示。仅动 `thprac_th16_logger.{h,cpp}`，无新钩子、无新反编译、不改数据。**状态：真机验证通过（除完整全关外）**，仅剩全关测试。 |
 | 2026-10-16 | **建档**。落盘 TH16 ECL 段落监控的实施记录（beta）。开发流程：需求 → 逆向调研（`th16_ecl_re_report.md` / `th16_boss_phase_report.md`）→ 选型（采用方案二）→ 数据准备（回填 CSV 的 71 行 boss 行，`ST4 MID2` 删除，72→71）→ 设计（反汇编复核**订正 `res` 取法**：按宿主读 `host+0x11F8`，不用全局 `mgr+0x17C`）→ 编码（新增 `thprac_th16_logger.{h,cpp}` + 生成物 `thprac_th16_checkpoints_gen.cpp` + 脚本 `gen_th16_checkpoints.py`，`thprac_th16.cpp` 5 处共 +8 行，工程登记）→ 构建（Release\|x86 通过；途中修 `LNK1104` 输出占用、`LNK2001` 生成物缺命名空间）→ 提交（`4dd7362` 数据、`58745fe` 功能带 `beta:`）。核心机制：`th16_update` 每帧遍历 `mgr+0x180` 宿主链 × `host+0x11FC` 线程链，按每宿主 `host+0x11F8` 取 res，命中白名单即 latch、未命中 no-op、首命中前 `main`；不缓存任何指针。**状态：编译通过，未真机验证**（§7 清单待跑）。 |
