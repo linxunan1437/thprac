@@ -182,6 +182,22 @@ if (section) cache = section;                               // 命中 → 置值
 
 其它可复用指针（各作 `thprac_thXX.cpp` 顶部 enum）见各作文档 §1。
 
+### 5.3 boss 段（方案二）逐作锚点
+
+> **方案二**（与道中同机制）：读 **boss 宿主**里 ECL 引擎的**当前 sub 名** → 白名单 latch。boss ECL 跑在 **boss 敌人自己的宿主**里、**不在主线宿主**，故须**先取 boss 宿主**。逐作报告：`docs/th14/th14_boss_phase_report.md`、`docs/th15/th15_boss_phase_report.md`、`docs/th16/th16_boss_phase_report.md`、`docs/th17/th17_boss_phase_report.md`、`docs/th18/th18_boss_phase_report.md`。
+> 统一读取链（th15–18）：`thread=*(host+0xC)` → `subIdx=*(thread+4)` → `res=*(host+0x11F8)` → `table=*(res+0x8C)` → `name=*(char**)(table+subIdx*8)`；**th14 无 sub 索引**（`node+4`=绝对 ip，需 ip→sub 区间映射）。
+
+| 作 | 管理器全局（VA） | 槽表（存 id / 存宿主指针） | 宿主/对象链表头（`mgr+`） | 按槽取 host | 按 id 取 host | host id 字段 | boss 门控位 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| th14 | `0x4DB544` | `+0x5C+slot*4`（**直接存宿主指针**） | `+0xD0`（双向链） | `FUN_0041C050` | `FUN_00421AA0` | 对象 `+0x11E4` | `host+0x5244` bit23 | 🟡 |
+| th15 | `0x4E9A80` | `+0x48+slot*4`（存 **id**） | `+0x180` | `FUN_0041F7F0` | `FUN_004255E0` | `+0x5740` | `host+0x526C` bit23 | 🟡 |
+| th16 | `0x4A6DC0` | `+0x48+slot*4`（存 id） | `+0x180` | `FUN_00417580` | `FUN_0041A9C0` | `+0x5740` | `host+0x526C` bit23 | 🟡 |
+| th17 | `0x4B76A0` | `+0x48+slot*4`（存 id） | `+0x180` | `FUN_0041A5C0` | `FUN_0041DDD0` | `+0x5760` | `host+0x528C` bit23 | 🟡 |
+| th18 | `0x4CF2D0` | `+0x48+slot*4`（存 id） | `+0x18C` | `FUN_004237F0` | `FUN_0042D500` | `+0x6830` | `host+0x635C` bit23 | 🟡 |
+
+> 同代差异：th17/th18 宿主对象较 th15/th16 长大（th17 各字段 +0x20；th18 更大幅度换布局），故 id / 门控 / `B` 自指针偏移各异；**th14 槽表直接存宿主指针**（无需 id 匹配），且**无 sub 索引**（读 ip 再映射）。boss 对象 `B = host + …`（th15/16 `+0x120C`、th17 `+0x120C`、th18 `+0x122C`），`*(B+…)` = host 自指针（th15/16 `B+0x44B8`、th17 `B+0x44D8`、th18 `B+0x5588`）。
+> 已同步回填各作 `docs/logger/thXX_checkpoints.csv` 的 boss 行（第 1 列）：th14 64/72、th15 10、th17 63、th18 65（🟡 静态推导、未真机；细节见各作报告 §5）。
+
 ---
 
 ## 6. 通用逆向问题 Q1–Q9
@@ -272,3 +288,4 @@ if (section) cache = section;                               // 命中 → 置值
 | 2026-10-14 | **口径修正为目标＝实时显示「当前段落」**：checkpoint 定义为“段落开头对应的白名单函数（段落入口函数）”，读 ECL sub 降为手段。§0 表格、§1、§2 术语、§3 伪代码、§5.1 注记同步改写；新增 §2.1“与 Warp 的关系与粒度约定”；新增 **Q9（段落判定口径：A 调用栈祖先 / B 顺序 latch）**；§8/§9 相应调整。 |
 | 2026-10-15 | **登记反编译素材来源**：新增 `docs/logger/decompile_materials.md`（`../exes` 的 exe / ecl / decl 与 `../th15decode/` 的来源、清单、生成链、复核方式）；文档头与 §5.1 表头、注记同步指向该清单，明确 th10–18 各作 `.ecl`/`.decl` 已在机、可离线枚举段落入口。 |
 | 2026-10-15 | **订正 Q9 判定口径**：原「(A) 调用栈祖先法」与段内脚本结构不符——段内多个 `MainSubNN` 是 `MainFront`/`MainLatter` 的**兄弟 `call`**，彼此不互为祖先，「整段驻留栈上」不成立。改为**路过式 checkpoint（latch）**：经过表内函数即置值、不在表内 no-op（**不回退 `main`**）。据此**每个 checkpoint 只登记 1 个段落入口函数**（= warp 落点所进入的 sub，含 `async`）。“函数栈存在”仍是事实（Q3），但不参与判定。§0/§1.2/§2/§2.1/§6 Q9/§9 同步改写。 |
+| 2026-10-16 | **回填 boss 段（方案二）总表**：新增 §5.3「boss 段（方案二）逐作锚点」（th14–th18 的管理器全局 / 槽表 / 宿主链 / 按槽·按 id 取 host 函数 / host id / boss 门控位）；新建逐作报告 `docs/th{14,15,17,18}/thXX_boss_phase_report.md`（th16 已有），并回填各作 `docs/logger/thXX_checkpoints.csv` 的 boss 行（th14 64、th15 10、th17 63、th18 65）。**关键订正**：th15 `../th15decode/boss-phase-hook.md` 的 `host=*(E+0x44B8)` 有误（`mgr+0x180` 链上对象 `E` **本身即 host**；游戏自身「当前 boss」查询应为 `FUN_0041F7F0` 而非 `0x48F7F0`）；th17 报告 §4.1 的 `+0x48` 属管理器 `mgr`（`mgr+0x48` = 槽→id 表）、非 host 字段。状态：静态调研（🟡 未真机三态）。 |

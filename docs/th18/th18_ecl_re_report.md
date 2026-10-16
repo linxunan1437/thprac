@@ -767,3 +767,15 @@ if (section) current = section;               // 未命中 → no-op（不回退
 | 2026-10-14 | 建档。静态反汇编 th18 ECL VM，回答 Q1–Q9：**Q1 ✅** `*(Edi+4)` = sub **索引**（`Edi`=thread；写点 `0x42E43F` 初始化 `main`、`0x48D9BB` call 成功、`0x48D9A7` 失败→−1、`0x48B474` ret 恢复、`0x48B4D1` 结束→−1、`0x48D899` spawn→−1）；**Q2 ✅** `res = *(u32*)(*(u32*)0x4CF2D0+0x188) = *(u32*)(host+0x1218)`（**本作 `+0x188` 实测成立**）、`table = *(res+0x8C)`、`count = *(res+8)`、项 8 B（`+0` 名 / `+4` 始），加载器 `FUN_0048D9D0`（SCPT `0x54504353`）、按名查表 `FUN_0048D920`、重解码 `FUN_0048DBE0`；**Q3 ✅** 显式调用栈（`SP=thread+0x100C`、底 `thread+0xC`、帧 `0x10`、帧 `+0x0C`=调用者、上限 `0x1000` 护栏 `0x48B778`；`call` `0x48B66C`→压帧 `FUN_0048B030`、`ret` `0x48B43E`；根哨兵 −1；`spawn` `FUN_0048D850` 另起 0x1208 线程挂 `host+0x121C`）；**Q4 ✅** 宿主工厂 `FUN_0042D7D0`（`alloc 0x683c`）、宿主构造 `FUN_0042E100`、`"main"`@`0x4B6634` spawn 站点 `0x444228`/`0x444471`、捕获 `0x44422D`/`0x444476`（EAX=宿主）；根线程 = `host+0x10`（`0x42CE87`/`0x42CF08`）；**Q5 ✅** 命中点 `0x48C822`=`movss [edi],xmm1`(4B `f3 0f 11 0f`)、函数 `FUN_0048B3A0`(0x48B3A0)、opcode 表 `0x48D2A8`/`0x48D3B8`（`0x0A`/`0x0B`/`0x0C` 映射与 th15–17 一致）、步进器 `FUN_0048D420`；**Q6 ✅** 运行期保留名字；**Q7 🟡** 角色名表 `0x4B41E0`（Reimu/Marisa/Sakuya/Sanae）+ 角色函数表 `0x4B41F4/…`，**关卡内 character/shotType 全局未定位**；**Q8 ✅** `ECLJump` 仅写 `goto`(`0x0C`)，`0x48B700` 只改 `thread+0`/`thread+8`；**Q9 ✅ 定案 (A) 调用栈祖先法**〔**后于 2026-10-15 订正为「路过式 checkpoint（latch）」**〕。证据：`capstone` 只读反汇编（`../../reasm/th18/reth.py`）+ th15/16/17 逐字段对照。**未真机三态；段落入口白名单待枚举。** |
 | 2026-10-15 | 素材来源登记：`../exes/ecl/th18/`（`.ecl` 22 份）+ `../exes/ecl_dump/th18/`（`.decl` 22 份；本作无 eclmap，指令 `ins_*`）已在机；据此把「本机无 th18 `.ecl` / 无法离线解码」订正为「`.decl` 素材已在机、段落入口白名单待枚举」。清单见 `docs/logger/decompile_materials.md`。 |
 | 2026-10-15 | **订正 Q9 口径**：由「(A) 调用栈祖先法」改为「**路过式 checkpoint（latch）**」——经过白名单函数即置值、不在表内 no-op（不回退 `main`）。原因：一个段落可能跨多个兄弟 `call`，不互为祖先，「整段驻留栈上」不成立 → 每 checkpoint 只需登记 1 个入口 sub（含 async）。§0 Q9 行、§10、§11 同步改写。 |
+| 2026-10-16 | **新增 boss 段监控（方案二）交叉引用**：本作 boss 段的「方案二（读 boss 宿主里 ECL 当前 sub 名 + 白名单 latch）」逆向结论已单独立档 → **`docs/th18/th18_boss_phase_report.md`**（管理器 `0x4CF2D0`、槽→id `M+0x48`、对象链头 `M+0x18C`、按槽/按 id 取 host `FUN_004237F0`/`FUN_0042D500`、host id `+0x6830`、boss 门控 `host+0x635C & 0x800000`、boss 子对象 `B'=host+0x122C`）；并已回填 `docs/logger/th18_checkpoints.csv` 的 **65 行** boss 行（仅第 1 列）。本次仅追加交叉引用与变更记录，正文 Q1–Q9 结论不变。 |
+
+---
+
+## 15. 交叉引用：boss 段监控（方案二）
+
+> 本作 **boss 段**（`MID*`/`BOSS*`/`END_*`）的「**方案二**（读 boss 宿主里 ECL 当前 sub 名 + 白名单 latch）」逆向结论已单独立档：
+> **`docs/th18/th18_boss_phase_report.md`**（模板/上位 = `docs/th16/th16_boss_phase_report.md`）。
+>
+> 关键点（**本作偏移与 th16/17 不同**）：管理器 `M = *(u32*)0x4CF2D0`；**槽→id 表 `M+0x48+slot*4`**（槽 0 = 主 boss，thprac `bossExists` 同源）；**对象链头 `M+0x18C`**（节点 `[0]=host`、`[4]=next`）；**按槽取 host `FUN_004237F0`**（= th15 `FUN_0048F7F0` 同构）/ **按 id 取 host `FUN_0042D500`** / 注册槽 `FUN_0042D490`；**host id `+0x6830`**；**boss 门控 `host+0x635C & 0x800000`**；**boss 子对象 `B' = host+0x122C`**（`*(B'+0x5588)==host`，自指针 `host+0x67B4`）。
+>
+> 该报告并已回填 `docs/logger/th18_checkpoints.csv` 的 **65 行** boss 行（`MID*`/`BOSS*`/`END_*`，仅第 1 列；🟡 静态推导、未真机）。本文 §1/§1.1/§4/§5 的「当前 sub 名读取链」（`thread=*(host+0xC)`→`subIdx=*(thread+4)`→`res=*(host+0x1218)`→`table=*(res+0x8C)`）在 boss 宿主上**逐字段复用**。

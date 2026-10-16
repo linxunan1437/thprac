@@ -251,6 +251,14 @@ if (section) current = section;               // 未命中 → no-op（保持 cu
 
 ---
 
+## 5.1 boss 段监控（方案二）交叉引用
+
+- boss 段（读 **boss 宿主** ECL 当前 sub 名 + 白名单 latch，含「boss 宿主取法 / 口径冲突判定」）已**单独立档** → **`docs/th15/th15_boss_phase_report.md`**。
+- 本文 §1（`host→thread→subIdx(res)→sub 表` 链）、§3（latch 口径）与 boss 段**同机制**；boss 侧仅**多一步「先取 boss 宿主」**（`mgr+0x180` 链上对象 `E` **即 host**，`docs/th15/th15_boss_phase_report.md` §2）。
+- 已同步回填 `docs/logger/th15_checkpoints.csv` 的 **10 行** boss 行（ST1/ST2 BOSS；其余暂缺，见该报告 §5）。
+
+---
+
 ## 6. 变更记录
 
 | 日期 | 变更 |
@@ -258,3 +266,4 @@ if (section) current = section;               // 未命中 → no-op（保持 cu
 | 2026-10-14 | 建档。补 **Q3**（显式调用栈：`thread+0x100C`=SP、`thread+0xC` 栈底、帧 `0x10`、帧 `+0x0C`=祖先 sub；`call 0x0B` 压 / `ret 0x0A` 弹；深度上限 ≈256，护栏 `0x1000`；异步另起线程）；**Q8 确认**（`ECLJump` 只写 `goto`，不改 `thread+4`/sub 表，跳转后名字正确）；**Q9 定案为 (A) 调用栈祖先法**〔**后于 2026-10-15 订正为「路过式 checkpoint（latch）」**〕（`st01.ecl` 实测 `main→MainFront→MainSubNN`，入口 sub 驻留栈上；根哨兵 `-1` 兜底 `main`）。证据：`capstone` 反汇编 + 本机 `th15.exe_decompiled.c`（Ghidra）+ 离线 `.ecl` 解码。未真机三态。 |
 | 2026-10-15 | 素材来源登记：`../exes/ecl/th15/`（`.ecl` 23 份）+ `../exes/ecl_dump/th15/`（`.decl` 23 份）已在机；`st01.ecl` 与 `../th15decode/data/st01.ecl` 为同一脚本两处副本。清单见 `docs/logger/decompile_materials.md`。 |
 | 2026-10-15 | **订正 Q9 口径**：由「(A) 调用栈祖先法」改为「**路过式 checkpoint（latch）**」——经过白名单函数即置值、不在表内 no-op（不回退 `main`）。原因：段内 `MainSubNN` 是 `MainFront`/`MainLatter` 的**兄弟 `call`**，不互为祖先，「整段驻留栈上」不成立 → 每 checkpoint 只需登记 1 个入口 sub（含 async）。§0 Q9 行、§3、§5 同步改写。 |
+| 2026-10-16 | **追加 boss 段（方案二）交叉引用**：新增 §5.1 指向 `docs/th15/th15_boss_phase_report.md`（boss 段读 boss 宿主当前 sub 名 + latch；含 boss 宿主取法、与 `../th15decode/boss-phase-hook.md` 的口径冲突判定、10 行 boss 行回填）。本文 Q1–Q9 结论不变。 |
