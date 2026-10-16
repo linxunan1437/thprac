@@ -64,6 +64,13 @@ namespace TH16 {
         // Keys/values alias mEntries' strings; mEntries is frozen after LoadCsv().
         std::unordered_map<const char*, const char*, CStrHash, CStrEq> mStageMap;
         const char* mSection = "main";
+        // Mid-boss window: while a mid-boss is alive, chapter checkpoints are
+        // reinforcement sections of the latter half and are held back here until
+        // the mid-boss fight ends. mMidBossDone stops a late hit on the entry sub
+        // (MBoss() spins on `wait(1000)` after @MBoss1() returns) from reopening it.
+        const char* mPending = nullptr;
+        bool mMidBossActive = false;
+        bool mMidBossDone = false;
         int32_t mBuiltStage = -1;
     };
 
