@@ -453,7 +453,23 @@ bool CloneReplayWithParams(const std::wstring& rep_path, const std::string& para
 // 热路径（VEH 回调）里只允许调用 Begin / Tick / Latch / PushEvent：它们不碰堆、不做文件 IO。
 // 序列化与写盘全部收在 Flush() 里，一局至多一次。
 
-enum class GameLogEventType : int8_t { Miss, Bomb };
+enum class GameLogEventType : int8_t { Miss, Bomb, Break };
+
+// 事件类型 → JSON 字符串。用 switch 而非二元三元表达式：后者对任何非 Miss 的
+// 值都输出 "bomb"，新增枚举值时会静默错标；switch 漏写 case 则落到末尾兜底，
+// 输出显眼的 "?"（MSVC 的 C4062 只在 /Wall 下报，本工程 /W4 不报，指望不上编译器）。
+inline const char* GameLogEventTypeName(GameLogEventType type)
+{
+    switch (type) {
+    case GameLogEventType::Miss:
+        return "miss";
+    case GameLogEventType::Bomb:
+        return "bomb";
+    case GameLogEventType::Break:
+        return "break";
+    }
+    return "?";
+}
 
 struct GameLogEvent {
     GameLogEventType type;

@@ -1476,7 +1476,7 @@ static std::string GameSessionBuildJsonLine(const char* gameId, const GameSessio
     {
         rapidjson::Value events(rapidjson::kArrayType);
         for (int32_t i = 0; i < data.eventCount; ++i) {
-            const char* type = (data.events[i].type == GameLogEventType::Miss) ? "miss" : "bomb";
+            const char* type = GameLogEventTypeName(data.events[i].type);
             const char* checkpoint = data.events[i].checkpoint ? data.events[i].checkpoint : "main";
             rapidjson::Value event(rapidjson::kObjectType);
             event.AddMember(rapidjson::Value("type", jalloc), rapidjson::Value(type, jalloc), jalloc);

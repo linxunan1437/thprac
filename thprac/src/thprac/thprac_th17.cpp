@@ -163,9 +163,10 @@ namespace TH17 {
             return mSection;
         }
 
-        // 一局日志：miss/bomb 发生时记下当前段落（见 thprac_games.h 的 GameSession）。
+        // 一局日志：miss/bomb/roar break 发生时记下当前段落（见 thprac_games.h 的 GameSession）。
         void OnMiss();
         void OnBomb();
+        void OnBreak();
 
     private:
         TH17Logger();
@@ -271,6 +272,12 @@ namespace TH17 {
     {
         // No allocation: this runs inside a VEH hook callback.
         mSession.PushEvent(GameLogEventType::Bomb, mSection);
+    }
+
+    void TH17Logger::OnBreak()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Break, mSection);
     }
 
     void TH17Logger::Update()
@@ -3063,6 +3070,7 @@ namespace TH17 {
     EHOOK_DY(th17_roar_break, 0x40F880,10,
     {
         TH17InGameInfo::singleton().mRoarBreakCount++;
+        TH17Logger::singleton().OnBreak();
     })
     EHOOK_DY(th17_roar, 0x40FC8A,7,
     {
