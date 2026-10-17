@@ -37,3 +37,30 @@ th14.cpp中可能已经有了类似的hook, 可以检查一下作为复用.
 
 
 
+## 落地口径（2026-10-17 定案）
+
+> 本节的目的是把上面需求里留了自由度的地方**钉死**，供实现与后续迭代引用。**不改动上方原有需求文字。**
+> 实现记录：`docs/logger/logger_impl_report.md`；进度：`docs/logger/logger_progress.md`。
+
+| # | 项 | 定案 |
+| --- | --- | --- |
+| 1 | 文件格式 | **JSONL**：一行一局，纯追加，不读回改写（与既有 `gametime_sessions.jsonl` 同族） |
+| 2 | 文件位置与命名 | `<thprac 数据目录>logger_sessions_YYYYMM.jsonl`，**每月一个**，五作共享、靠 `game` 字段区分 |
+| 3 | 一局边界 | 开始 = `*_game_start` 钩子（含重开）；结束 = `PLAYER_PTR` 由非 0 变 0。**该判据直接复用各作 IGI 面板的显隐判据**，不新增逆向 |
+| 4 | 强退进程 | 视为**主动放弃记录**，不处理 |
+| 5 | 「启动位置」的定义 | = **启动 checkpoint**：练习模式选择的起始关卡与章节/boss 阶段。取值为**本局首次 latch 到的记录名**（练习 warp 时 ECL 直接跳到落点，故首次 latch 即练习选的段落）；非练习启动则为首个命中白名单的段落 |
+| 6 | checkpoint 字段 | 只有「启动 checkpoint」与「结束 checkpoint」两个（§5 的「最后checkpoint」与「结束checkpoint」合并；正常情况两者相同） |
+| 7 | 记录名口径 | 全部取 CSV 第 4 列「记录名」；本局首次命中白名单函数之前记 `main` |
+| 8 | 覆盖范围 | th14 / th15 / th16 / th17 / th18（其余作监控未落地） |
+| 9 | 机体类型 | 取该作 IGI 面板 `diff_pl` 行显示的机体串；**th18 留空**（其 IGI 无该行、地址未登记） |
+
+**一行 JSON 示例**（字段说明见实现报告 §2）：
+
+```json
+{"game":"th16","start":"2026-10-17 21:03:44","shot":"ReimuA","startCheckpoint":"ST1 前半 #1","endCheckpoint":"ST3 BOSS1","checkpointCount":11,"events":[{"type":"bomb","checkpoint":"ST1 后半 #2"},{"type":"miss","checkpoint":"ST2 BOSS2"}]}
+```
+
+> 本迭代**不含**：th18 的机体类型、强退进程落盘、日志文件读回、th10–th13 与 th06–th08 的接线。
+
+
+

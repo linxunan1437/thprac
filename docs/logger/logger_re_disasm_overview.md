@@ -1,7 +1,7 @@
 # ECL 段落监控（读取 ECL 函数为手段）— 总括反编译需求文档
 
 > 需求来源：`docs/req_logger.md`
-> 本迭代范围：**仅监控**（**实时显示“当前段落”**；读 ECL sub 只是判定手段）；**不含日志记录**（JSON 落盘、checkpoint 统计、miss/bomb 列表）。
+> 范围：**监控**（**实时显示“当前段落”**；读 ECL sub 只是判定手段）已落地 th14–th18；**日志记录**（JSON 落盘、checkpoint 统计、miss/bomb 列表）已于 2026-10-17 接入 th14–th18（见 `docs/logger/logger_impl_report.md`），**真机未测**。
 > 逐作需求：`docs/<作>/<作>_ecl_re_requests.md`（th10 ~ th18）。
 > 反编译素材清单与来源：`docs/logger/decompile_materials.md`。
 > 文档类型：**逆向需求文档（requests）**。§5 的“结论/状态”列由后续逆向迭代回填。
@@ -18,8 +18,8 @@
 | 白名单匹配（路过即置值，未命中 no-op） | ✅ | |
 | IGI 显示（miss/bomb 计数下一行） | ✅ | |
 | 读白名单 CSV 的“记录名”列 | 不消费（仅用“段落入口函数/游戏/关卡”做匹配） | ✅ |
-| 每次启动/退出的 JSON 日志 | ❌ | ✅ |
-| miss/bomb 事件列表、checkpoint 统计 | ❌ | ✅ |
+| 每次启动/退出的 JSON 日志 | ✅ 已接线（th14–th18，**未真机**） | |
+| miss/bomb 事件列表、checkpoint 统计 | ✅ 已接线（th14–th18，**未真机**） | |
 
 > **最终目的**：实时显示**当前段落**。CSV 里每个 checkpoint 都**指向一个段落的开头**；“读取当前 ECL 函数(sub)”只是判定“现在到了哪个段落”的手段。日志迭代里的“启动/最后/经过的 checkpoint”全部是**段落级**。
 
