@@ -163,6 +163,10 @@ namespace TH17 {
             return mSection;
         }
 
+        // 一局日志：miss/bomb 发生时记下当前段落（见 thprac_games.h 的 GameSession）。
+        void OnMiss();
+        void OnBomb();
+
     private:
         TH17Logger();
 
@@ -200,6 +204,7 @@ namespace TH17 {
         bool mMidBossActive = false;
         bool mMidBossDone = false;
         int32_t mBuiltStage = -1;
+        GameSession mSession;
     };
 
     TH17Logger::TH17Logger()
@@ -249,14 +254,33 @@ namespace TH17 {
     void TH17Logger::OnStageStart()
     {
         // No allocation: this runs inside a VEH hook callback.
+        mSession.Begin("th17");
         mSection = "main";
         mPending = nullptr;
         mMidBossActive = false;
         mMidBossDone = false;
     }
 
+    void TH17Logger::OnMiss()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Miss, mSection);
+    }
+
+    void TH17Logger::OnBomb()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Bomb, mSection);
+    }
+
     void TH17Logger::Update()
     {
+        // 一局边界与落盘必须在所有 early return 之前：退出一局后 STAGE_NUM 会落到菜单态。
+        bool inGame = GetMemContent<uint32_t>(PLAYER_PTR) != 0;
+        mSession.Tick(inGame, (inGame && mSession.NeedsStartInfo())
+                ? S(IGI_PL_17[(*(int32_t*)(0x4B59F4)) * 3 + (*(int32_t*)(0x4B59F8))])
+                : nullptr);
+
         int32_t stageNum = GetMemContent<int32_t>(STAGE_NUM);
         if (stageNum == 9) {
             // Extra is reported as 9 by some code paths and 7 by others; th16 saw
@@ -387,6 +411,8 @@ namespace TH17 {
                 mSection = chapHit;
             }
         }
+
+        mSession.Latch(GameLogRecordOfSection(mSection));
     }
 
     using std::pair;
@@ -3069,11 +3095,13 @@ namespace TH17 {
     EHOOK_DY(th17_life_dec, 0x44921B,6,
     {
         TH17InGameInfo::singleton().mMissCount++;
+        TH17Logger::singleton().OnMiss();
         FastRetry(thPracParam.mode);
     })
     EHOOK_DY(th17_bomb_dec, 0x411CAB,6,
     {
         TH17InGameInfo::singleton().mBombCount++;
+        TH17Logger::singleton().OnBomb();
     })
     EHOOK_DY(th17_lock_timer1, 0x42A3CA,10, // initialize
     {

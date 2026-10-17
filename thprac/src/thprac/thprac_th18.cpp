@@ -144,6 +144,10 @@ namespace TH18 {
             return mSection;
         }
 
+        // 一局日志：miss/bomb 发生时记下当前段落（见 thprac_games.h 的 GameSession）。
+        void OnMiss();
+        void OnBomb();
+
     private:
         TH18Logger();
 
@@ -181,6 +185,7 @@ namespace TH18 {
         bool mMidBossActive = false;
         bool mMidBossDone = false;
         int32_t mBuiltStage = -1;
+        GameSession mSession;
     };
 
     TH18Logger::TH18Logger()
@@ -230,14 +235,31 @@ namespace TH18 {
     void TH18Logger::OnStageStart()
     {
         // No allocation: this runs inside a VEH hook callback.
+        mSession.Begin("th18");
         mSection = "main";
         mPending = nullptr;
         mMidBossActive = false;
         mMidBossDone = false;
     }
 
+    void TH18Logger::OnMiss()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Miss, mSection);
+    }
+
+    void TH18Logger::OnBomb()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Bomb, mSection);
+    }
+
     void TH18Logger::Update()
     {
+        // 一局边界与落盘必须在所有 early return 之前：退出一局后 STAGE_NUM 会落到菜单态。
+        bool inGame = GetMemContent<uint32_t>(PLAYER_PTR) != 0;
+        mSession.Tick(inGame);
+
         int32_t stageNum = GetMemContent<int32_t>(STAGE_NUM);
         // th18 reports 1..7, where 7 is Extra; the practice menu maps stage 7 to
         // Extra as well (see THGuiPrac). Some code paths elsewhere report Extra as
@@ -367,6 +389,8 @@ namespace TH18 {
                 mSection = chapHit;
             }
         }
+
+        mSession.Latch(GameLogRecordOfSection(mSection));
     }
 
     enum funcs {
@@ -4383,14 +4407,17 @@ namespace TH18 {
     EHOOK_DY(th18_bomb_dec, 0x4574D3,4, // bomb dec
     {
         TH18InGameInfo::singleton().mBombCount++;
+        TH18Logger::singleton().OnBomb();
     })
     EHOOK_DY(th18_cylinder, 0x410F22,5, // cylinder
     {
         TH18InGameInfo::singleton().mBombCount++;
+        TH18Logger::singleton().OnBomb();
     })
     EHOOK_DY(th18_life_dec, 0x45D1A3,5, // life dec
     {
         TH18InGameInfo::singleton().mMissCount++;
+        TH18Logger::singleton().OnMiss();
         FastRetry(thPracParam.mode);
     })
     EHOOK_DY(th18_deadbomb1, 0x40DA1C,5, // rokumon

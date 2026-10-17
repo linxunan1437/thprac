@@ -109,6 +109,10 @@ namespace TH15 {
             return mSection;
         }
 
+        // 一局日志：miss/bomb 发生时记下当前段落（见 thprac_games.h 的 GameSession）。
+        void OnMiss();
+        void OnBomb();
+
     private:
         TH15Logger();
 
@@ -149,6 +153,7 @@ namespace TH15 {
         bool mMidBossActive = false;
         const char* mMidBossDoneRecord = nullptr;
         int32_t mBuiltStage = -1;
+        GameSession mSession;
     };
 
     TH15Logger::TH15Logger()
@@ -198,14 +203,33 @@ namespace TH15 {
     void TH15Logger::OnStageStart()
     {
         // No allocation: this runs inside a VEH hook callback.
+        mSession.Begin("th15");
         mSection = "main";
         mPending = nullptr;
         mMidBossActive = false;
         mMidBossDoneRecord = nullptr;
     }
 
+    void TH15Logger::OnMiss()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Miss, mSection);
+    }
+
+    void TH15Logger::OnBomb()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Bomb, mSection);
+    }
+
     void TH15Logger::Update()
     {
+        // 一局边界与落盘必须在所有 early return 之前：退出一局后 STAGE_NUM 会落到菜单态。
+        bool inGame = GetMemContent<uint32_t>(PLAYER_PTR) != 0;
+        mSession.Tick(inGame, (inGame && mSession.NeedsStartInfo())
+                ? S(IGI_PL_15[static_cast<byte>(*(int32_t*)0x4E7404)])
+                : nullptr);
+
         int32_t stageNum = GetMemContent<int32_t>(STAGE_NUM);
         if (stageNum == 9) {
             // The game itself flips 0x4E73F0 between 7 and 9 for the same stage
@@ -341,6 +365,8 @@ namespace TH15 {
                 mSection = chapHit;
             }
         }
+
+        mSession.Latch(GameLogRecordOfSection(mSection));
     }
 
       enum funcs {
@@ -3014,10 +3040,12 @@ namespace TH15 {
     EHOOK_DY(th15_bomb_dec, 0x41497A,5, // bomb dec
     {
         TH15InGameInfo::singleton().mBombCount++;
+        TH15Logger::singleton().OnBomb();
     })
     EHOOK_DY(th15_life_dec, 0x456398,5, // life dec
     {
        TH15InGameInfo::singleton().mMissCount++;
+       TH15Logger::singleton().OnMiss();
        FastRetry(thPracParam.mode);
     })
     EHOOK_DY(th15_lock_timer1, 0x43404A,10, // initialize

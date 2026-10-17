@@ -93,6 +93,10 @@ namespace TH16 {
             return mSection;
         }
 
+        // 一局日志：miss/bomb 发生时记下当前段落（见 thprac_games.h 的 GameSession）。
+        void OnMiss();
+        void OnBomb();
+
     private:
         TH16Logger();
 
@@ -130,6 +134,7 @@ namespace TH16 {
         bool mMidBossActive = false;
         bool mMidBossDone = false;
         int32_t mBuiltStage = -1;
+        GameSession mSession;
     };
 
     TH16Logger::TH16Logger()
@@ -179,14 +184,33 @@ namespace TH16 {
     void TH16Logger::OnStageStart()
     {
         // No allocation: this runs inside a VEH hook callback.
+        mSession.Begin("th16");
         mSection = "main";
         mPending = nullptr;
         mMidBossActive = false;
         mMidBossDone = false;
     }
 
+    void TH16Logger::OnMiss()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Miss, mSection);
+    }
+
+    void TH16Logger::OnBomb()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        mSession.PushEvent(GameLogEventType::Bomb, mSection);
+    }
+
     void TH16Logger::Update()
     {
+        // 一局边界与落盘必须在所有 early return 之前：退出一局后 STAGE_NUM 会落到菜单态。
+        bool inGame = GetMemContent<uint32_t>(PLAYER_PTR) != 0;
+        mSession.Tick(inGame, (inGame && mSession.NeedsStartInfo())
+                ? std::format("{}{}", S(IGI_PL_16[*(int32_t*)0x4A57A4]), S(IGI_PL_16S[*(int32_t*)0x4A57AC])).c_str()
+                : nullptr);
+
         int32_t stageNum = GetMemContent<int32_t>(STAGE_NUM);
         if (stageNum == 9) {
             // Extra is reported as 9 by some code paths, 7 by others.
@@ -311,6 +335,8 @@ namespace TH16 {
                 mSection = chapHit;
             }
         }
+
+        mSession.Latch(GameLogRecordOfSection(mSection));
     }
 
     int g_lock_timer = 0;
@@ -3057,10 +3083,12 @@ namespace TH16 {
     EHOOK_DY(th16_bomb_dec, 0x40DB9C,5, // bomb dec
     {
         TH16InGameInfo::singleton().mBombCount++;
+        TH16Logger::singleton().OnBomb();
     })
     EHOOK_DY(th16_life_dec, 0x443D3A,5, // life dec
     {
         TH16InGameInfo::singleton().mMissCount++;
+        TH16Logger::singleton().OnMiss();
         FastRetry(thPracParam.mode);
     })
     EHOOK_DY(th16_release, 0x40DC8A,10,
