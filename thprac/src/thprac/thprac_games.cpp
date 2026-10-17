@@ -1449,6 +1449,149 @@ bool CloneReplayWithParams(const std::wstring& rep_path, const std::string& para
 
 #pragma endregion
 
+#pragma region Game Session Log
+
+// 一局一行 JSON，追加到 <数据目录>logger_sessions_YYYYMM.jsonl。
+// 写盘骨架照搬 thprac_launcher_others.cpp 的 AppendGameSessionLine（FILE_APPEND_DATA + OPEN_ALWAYS）。
+static std::string GameSessionBuildJsonLine(const char* gameId, const GameSessionData& data)
+{
+    char startBuf[32] = {};
+    if (data.hasStart) {
+        std::snprintf(startBuf, sizeof(startBuf), "%04u-%02u-%02u %02u:%02u:%02u",
+            (unsigned)data.start.wYear, (unsigned)data.start.wMonth, (unsigned)data.start.wDay,
+            (unsigned)data.start.wHour, (unsigned)data.start.wMinute, (unsigned)data.start.wSecond);
+    }
+    const char* startCheckpoint = data.startCheckpoint ? data.startCheckpoint : "main";
+    const char* endCheckpoint = data.endCheckpoint ? data.endCheckpoint : "main";
+    int32_t checkpointCount = data.checkpointCount;
+    int32_t eventsDropped = data.droppedEvents;
+
+    CreateJson();
+    AddJsonValueEx(game, gameId, jalloc);
+    AddJsonValueEx(start, startBuf, jalloc);
+    AddJsonValueEx(shot, data.shot, jalloc);
+    AddJsonValueEx(startCheckpoint, startCheckpoint, jalloc);
+    AddJsonValueEx(endCheckpoint, endCheckpoint, jalloc);
+    AddJsonValue(checkpointCount);
+    {
+        rapidjson::Value events(rapidjson::kArrayType);
+        for (int32_t i = 0; i < data.eventCount; ++i) {
+            const char* type = (data.events[i].type == GameLogEventType::Miss) ? "miss" : "bomb";
+            const char* checkpoint = data.events[i].checkpoint ? data.events[i].checkpoint : "main";
+            rapidjson::Value event(rapidjson::kObjectType);
+            event.AddMember(rapidjson::Value("type", jalloc), rapidjson::Value(type, jalloc), jalloc);
+            event.AddMember(rapidjson::Value("checkpoint", jalloc), rapidjson::Value(checkpoint, jalloc), jalloc);
+            events.PushBack(event, jalloc);
+        }
+        param.AddMember(rapidjson::Value("events", jalloc), events, jalloc);
+    }
+    if (eventsDropped)
+        AddJsonValue(eventsDropped);
+    ReturnJson();
+}
+
+void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
+{
+    auto dir = LauncherGetDataDir();
+    if (dir.empty())
+        return;
+
+    auto line = GameSessionBuildJsonLine(gameId, data);
+    if (line.empty())
+        return;
+
+    SYSTEMTIME now {};
+    GetLocalTime(&now);
+    wchar_t suffix[32];
+    swprintf_s(suffix, L"logger_sessions_%04u%02u.jsonl", (unsigned)now.wYear, (unsigned)now.wMonth);
+
+    auto hFile = CreateFileW((dir + suffix).c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
+        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+        return;
+    defer(CloseHandle(hFile));
+
+    SetFilePointer(hFile, 0, nullptr, FILE_END);
+    DWORD written = 0;
+    WriteFile(hFile, line.c_str(), (DWORD)line.size(), &written, nullptr);
+    WriteFile(hFile, "\n", 1, &written, nullptr);
+}
+
+void GameSession::Begin(const char* gameId)
+{
+    // No allocation: this runs inside a VEH hook callback.
+    mGameId = gameId;
+    if (mOpen) {
+        mPending = mCur;
+        mHasPending = true;
+    }
+    mCur = {};
+    mOpen = true;
+    mWasInGame = false;
+}
+
+void GameSession::Tick(bool inGame, const char* shot)
+{
+    if (mOpen) {
+        if (!mCur.hasStart && inGame) {
+            GetLocalTime(&mCur.start);
+            mCur.hasStart = true;
+            if (shot)
+                std::snprintf(mCur.shot, sizeof(mCur.shot), "%s", shot);
+        }
+        if (mWasInGame && !inGame) {
+            // 一局结束（回菜单 / 自然结束 / 退出）：本局快照转待落盘，下面同一帧写盘。
+            mPending = mCur;
+            mHasPending = true;
+            mCur = {};
+            mOpen = false;
+        }
+    }
+    mWasInGame = inGame;
+
+    if (mHasPending) {
+        Flush(mPending);
+        mPending = {};
+        mHasPending = false;
+    }
+}
+
+void GameSession::Latch(const char* record)
+{
+    if (!mOpen || !record)
+        return;
+    if (record == mCur.endCheckpoint)
+        return;
+    // 记录名相同但指针不同（CSV 里同名行）也算同一段，不重复计数。
+    if (mCur.endCheckpoint && std::strcmp(record, mCur.endCheckpoint) == 0)
+        return;
+    if (!mCur.startCheckpoint)
+        mCur.startCheckpoint = record;
+    mCur.endCheckpoint = record;
+    ++mCur.checkpointCount;
+}
+
+void GameSession::PushEvent(GameLogEventType type, const char* checkpoint)
+{
+    if (!mOpen)
+        return;
+    if (mCur.eventCount < GameSessionData::kMaxEvents) {
+        mCur.events[mCur.eventCount++] = { type, checkpoint };
+    } else {
+        ++mCur.droppedEvents;
+    }
+}
+
+void GameSession::Flush(const GameSessionData& data)
+{
+    // 本局从未进入游戏（例如 game_start 后立刻回菜单），不记。
+    if (!data.hasStart)
+        return;
+    GameSessionAppendJsonLine(mGameId, data);
+}
+
+#pragma endregion
+
 #pragma region Virtual File System
 
 void VFile::Write(const char* data)

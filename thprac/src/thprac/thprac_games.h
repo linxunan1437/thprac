@@ -7,6 +7,8 @@
 #include <vector>
 #include <unordered_map>
 #include <optional>
+#include <cstring>
+#include <cstdint>
 #define BOSS_MOVE_DOWN_RANGE_INIT 0.5
 
 struct IDirect3DDevice8;
@@ -442,6 +444,65 @@ bool CloneReplayWithParams(const std::wstring& rep_path, const std::string& para
         }                                                                                  \
         param.AddMember(rapidjson::Value(#value_name, jalloc), json_##value_name, jalloc); \
     }
+
+#pragma endregion
+
+#pragma region Game Session Log
+
+// 一局游玩 = 一行 JSON，按月追加到数据目录（口径见 docs/req_logger.md）。
+// 热路径（VEH 回调）里只允许调用 Begin / Tick / Latch / PushEvent：它们不碰堆、不做文件 IO。
+// 序列化与写盘全部收在 Flush() 里，一局至多一次。
+
+enum class GameLogEventType : int8_t { Miss, Bomb };
+
+struct GameLogEvent {
+    GameLogEventType type;
+    const char* checkpoint; // 不拥有；指向冻结字符串或字面量 "main"
+};
+
+struct GameSessionData {
+    SYSTEMTIME start {};
+    bool hasStart = false;
+    char shot[24] {}; // 机体类型显示名；th18 暂无来源，留空
+    const char* startCheckpoint = nullptr; // 首次 latch；nullptr ⇒ 输出 "main"
+    const char* endCheckpoint = nullptr; // 最后一次 latch
+    int32_t checkpointCount = 0;
+    static constexpr int32_t kMaxEvents = 256;
+    GameLogEvent events[kMaxEvents] {};
+    int32_t eventCount = 0;
+    int32_t droppedEvents = 0;
+};
+
+// 一局的边界 = *_game_start（开新局，含重开）与 PLAYER_PTR 由非 0 变 0（一局结束）。
+// PLAYER_PTR 判据与各作 IGI 面板的显隐判据同源。
+class GameSession {
+public:
+    void Begin(const char* gameId); // *_game_start；上一局还开着就先转待落盘
+    void Tick(bool inGame, const char* shot = nullptr); // 每帧 Update 顶部（早于所有 early return）
+    void Latch(const char* record); // 每帧 Update 末尾
+    void PushEvent(GameLogEventType type, const char* checkpoint);
+
+    // 本局还没取到起始信息（时间/机体）——调用方据此决定是否值得去读机体地址。
+    bool NeedsStartInfo() const { return mOpen && !mCur.hasStart; }
+
+private:
+    void Flush(const GameSessionData& data);
+
+    GameSessionData mCur;
+    GameSessionData mPending;
+    const char* mGameId = nullptr;
+    bool mOpen = false;
+    bool mHasPending = false;
+    bool mWasInGame = false;
+};
+
+// "main" 是唯一的非 checkpoint 哨兵（req §监控功能 3）。
+inline const char* GameLogRecordOfSection(const char* section)
+{
+    return (section && std::strcmp(section, "main") != 0) ? section : nullptr;
+}
+
+void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data);
 
 #pragma endregion
 
