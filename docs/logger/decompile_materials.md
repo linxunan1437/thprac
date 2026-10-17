@@ -79,6 +79,8 @@
 
 **来源**：各作**安装目录的拆包结果**，取 `<游戏根>\[th<版本>…]\data\*.ecl`（Windows 侧游戏根 `D:\C P\C2H2\`）。切包目录名带方括号前缀（如 `[th10] 东方风神录`、`[th11] 东方地灵殿 (汉化版+日文版)`、`[th18]`），**一关 ≠ 一个 `.ecl`**：`default.ecl` 提供共享 sub，Boss / 道中Boss 段落在 `*bs` / `*mbs` / `*boss` / `*mboss` 里。
 
+> **2026-10-17 补记（素材的「实际被引用」情况）**：上表是**拆包目录里存在**的 `.ecl`，**不等于**都被该关 `ecli{}` 引用。两例：**th13 的 `st06mbs.ecl` 存在，但 ST6 的 `ecli{}` 不含它**（遗留未用文件）；**th10 无独立 boss 文件**（boss sub 内联在 `stageNN.ecl`）、**th12 只有 `stage07boss.ecl`**（st1–st6 的 boss 内联）。离线枚举一律以各关 `.decl` 头的 `ecli{}` 为准（见 `checkpoint_entry_backfill_workflow.md` §3.1）。
+
 ### 3.2 反编译 decl（`thecl -d` 产物）
 
 | 作品 | 目录 | `.decl` 数 | 备注 |
@@ -164,3 +166,4 @@ th15 作为**参照作**，另有一条**独立素材来源**（相对 `thprac/`
 | --- | --- |
 | 2026-10-15 | 建档。登记 `../exes` 下的 exe / ecl / decl 与 `../th15decode/` 的来源、清单、生成链与复核方式；作为各篇 `thXX_ecl_re_report.md` 的素材来源统一出处。 |
 | 2026-10-16 | **补记 A 代（th06–th08）素材缺口**：§0/§2 注明 th06 **无 exe**（本体在 `D:\C P\C2H2\[th06]\東方紅魔郷.exe`，指纹已实测一致、尚未入库）、三作**无 eclmap**（THTK `MAP/` 无 `ECL_MAP_06/07.txt`）、`.ecl` 未从 `.dat` 解出 ⇒ **A 代无法离线枚举具名 sub**。A 代已 E0 建档（`docs/th06\|th07\|th08/thXX_ecl_re_requests.md`）。 |
+| 2026-10-17 | **§3.1 补记「实际被引用」情况**：拆包目录里的 `.ecl` 不一定被该关 `ecli{}` 引用（th13 `st06mbs.ecl` 未用；th10 无独立 boss 文件、th12 仅 `stage07boss.ecl`）。离线枚举以 `ecli{}` 为准。 |

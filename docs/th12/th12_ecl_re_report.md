@@ -24,7 +24,7 @@
 | **Q6 名字来源** | ✅ **运行期保留名字** | `table[i].+0` 为 `char*`，指向**已加载 ECL 缓冲内的名字串**（加载器 `FUN_004692E0` 在 `0x46937E` 填入）；访问器 `FUN_0040E8F0`。但因 Q1 是地址语义，取「当前 sub 名」需**地址 → sub 反查**（用 `table[i].+4+0x10` 建区间表排序后二分/线性扫）。 |
 | **Q7 机体 / 子机** | ✅ 地址有效（thprac 既有） | `CHARA = 0x4B0C90`（xref 72）、`SUBSHOT = 0x4B0C94`（xref 51）、`STAGE_NUM = 0x4B0CB0`（73）、`MODEFLAGS = 0x4B0CE0`（57）、`PLAYER_PTR = 0x4B4514`（116）、`REPLAY_MGR_PTR = 0x4B4518`（31）。语义仍待真机核对。 |
 | **Q8 ECLJump** | ✅ **不影响判读** | 练习补丁只把 `goto`(`opcode 0x0C`) 写进运行期缓冲；`goto`(case @ `0x4673FC`) **只改 `T+0`(时间) 与 `T+4`(ip)**，不触碰 sub 表、不触碰「当前 sub」的任何旁路字段。⚠️ **更正**：requests 里的 `ECLCallSub` 在 th12 源码中**从未被调用（死代码）**，且其写出的 6 个 dword 与真实 `call` 指令头不符（`size` 会落到 `+6` = 0）⇒ **不可用于 th12**。 |
-| **Q9 段落判定口径** | ✅ **路过式 checkpoint（latch）**，但**读取面扩大** | CSV 即白名单：**宿主线程链上任一线程**的当前 sub（经 Q2 地址区间表把 `T+4` 映射回名字）∈ 表 → 置当前段落；**不在 → no-op**（不回退 `main`）。**⚠️ 与 th13 的实质差异**：th12 的段落 sub 由 `@MainSubNN() async`（**opcode `0x0F`**）**派生为独立线程**，主线线程的 `T+4` 全程停留在 `main` ⇒ **只读主线线程无效，必须遍历宿主线程链 `H+0x1030`**。**每 checkpoint 只登记 1 个入口函数**（含 async 落点）。**⚠️ 段落入口白名单尚未枚举（`.decl`/`.ecl` 素材已在机，方法见 §10.4）。** |
+| **Q9 段落判定口径** | ✅ **路过式 checkpoint（latch）**，但**读取面扩大** | CSV 即白名单：**宿主线程链上任一线程**的当前 sub（经 Q2 地址区间表把 `T+4` 映射回名字）∈ 表 → 置当前段落；**不在 → no-op**（不回退 `main`）。**⚠️ 与 th13 的实质差异**：th12 的段落 sub 由 `@MainSubNN() async`（**opcode `0x0F`**）**派生为独立线程**，主线线程的 `T+4` 全程停留在 `main` ⇒ **只读主线线程无效，必须遍历宿主线程链 `H+0x1030`**。**每 checkpoint 只登记 1 个入口函数**（含 async 落点）。**✅ 段落入口白名单已枚举完毕（2026-10-17）**：`docs/logger/th12_checkpoints.csv` 第 1 列 **114/114**（章节 43/43、boss 71/71）；入口表小结见 `docs/th12/th12_checkpoint_entry_report.md`（§10.4 收口）。 |
 
 > **关键地址（VA / RVA）**：
 > ECL 主解释器 `FUN_00467170` = `0x467170`/`0x67170`（体 `0x467170`–`0x468C37`）；
@@ -633,9 +633,11 @@ for (u32 node = H + 0x1030; node; node = *(u32*)(node + 4)) {
 ```
 > checkpoint 粒度 = 每行 1 个入口 sub（th12 即 `MainSubNN` 级）；**含 async 落点**；容器（`main`）不入表。
 
-### 10.4 ⚠️ 段落入口白名单：**未定论 / 待枚举**（阶段 E3/E4，不在本次范围）
+### 10.4 ✅ 段落入口白名单：**已枚举完毕（2026-10-17）**
 
-**方法与已有的强证据（本次已抽验，供 E3/E4 直接使用）**：
+> **收口**：本节原为「未定论 / 待枚举」。现已按下列方法**机械化枚举完毕**，成品 = `docs/logger/th12_checkpoints.csv` 第 1 列 **114/114**（章节 43/43、boss 71/71）；**入口表小结 + 本作特有机制（两个 warp API、boss 行口径、`ST6 BOSS9/BOSS10` 修正、实现影响、风险）= `docs/th12/th12_checkpoint_entry_report.md`**。以下「方法与抽验」保留为**可复现过程**。
+
+**方法与已有的强证据（本次已抽验；E3/E4 已据此枚举完毕）**：
 
 `THStageWarp`（`thprac_th12.cpp:1018`–`1804`）的每次调用形如：
 ```cpp
@@ -662,8 +664,8 @@ ECLJumpEx(ecl, <start>, <dest>, at_frame, ecl_time);   // 在 start 写 goto，�
 1. 从 `thprac_th12.cpp` 的 `THStageWarp`/`THPatch` 抽出全部 `ECLJumpEx/Jump` 的 `(stage, portion, dest)`；
 2. 按 stage → `.ecl` 文件（st1–6 → `stage0N.ecl`；st7 → `stage07.ecl` + `stage07boss.ecl`；各关共享 `default.ecl`）解析 SCPT 头（`+6` = hdr、`+0x10` = sub 数、偏移数组在 `buf+0x24+hdr`、名字区紧随其后）；
 3. 在 `dest` 处解码指令头：`op == 0x000F / 0x000B` ⇒ 读 `+0x10`（名字长度）→ `+0x14` 起的名字串 = **段落入口函数**；
-4. `portion 1` = 无补丁（关卡开头），入口取该关第一个实际段落 sub（**待定**）。
-> ⚠️ 上述第 4 条与「`ECLJump`（非 `Ex`）形态的段」（write-back 型、无 dest）仍**未定论**；stage3 p5 等处还有**原始字节写入**（`SetPos(0x12654)` + 多条 `ecl << opcode ...`），需逐个离线核对。**本报告不填 CSV**（阶段 E3/E4）。
+4. `portion 1` = 无补丁（关卡开头），入口 = **`MainSub00`**（**已定案，各关一致**，2026-10-17）。
+> ✅ **收口（2026-10-17）**：第 4 条已定案 —— `portion 1` 入口 = **`MainSub00`**（ST1–ST7 一致）。「`ECLJump`（非 `Ex`）形态的段」（write-back 型、无 dest）在 th12 **不存在**：本作 warp **一律 `ECLJumpEx`**（`dest` 才是落点），名为 `ECLJump` 的函数（`thprac_th12.cpp:997`）**0 次调用**。stage3 p5 等处的**原始字节写入**（`SetPos(...)` + 多条 `ecl << opcode ...` / `pair{off,…}`）属同一「覆写名字串 / 覆写操作数」机制，已随本次枚举逐条核对，见 `docs/th12/th12_checkpoint_entry_report.md` §2.1 / §2.2。**CSV 已回填**（第 1 列 114/114）；**boss 行口径见该文档 §2.2–§2.3**（th12 无独立 boss 脚本文件、无 `$SPELL_ID`）。
 
 ### 10.5 风险：短命段落 sub
 
@@ -798,3 +800,4 @@ EHOOK_DY(th12_ecl_vm, 0x4671A0, 6, { if (IsMainHostThread(pCtx->Edi)) { /* 读 [
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-16 | 建档（本报告）。静态定案 th12 的 Q1–Q9。**Q1** `[T+4]` = **当前指令绝对地址（不是 sub 索引）**，写入点 `0x411E51`/`0x413448`/`0x413EEA`/`0x413FC0`/`0x467122`/`0x467409`/`0x4671F9`/`0x468BF3`/`0x468C24`；**Q2** `mgr=*(u32*)0x4B43DC` → `res=*(mgr+0x64)` → `count=res+8` → `table=res+0x8C`（项 8B，`+0`=名字 `char*`，`+4`=数据基址，首指令 `+4+0x10`），访问器 `0x40E8F0`/`0x40E920`/`0x40E930`，加载器 `FUN_004692E0`（SCPT `0x54504353`），查表 `FUN_004694F0`；**Q3** 显式调用栈（基址 `T+8`、SP `T+0x1008`、帧长 `0x0C`、帧 `+0x08`=调用者 ip，压帧 `FUN_00466F00`，弹帧 `ret`@`0x4671CD`），**async 派生线程各有独立栈**；**Q4** 宿主工厂 `FUN_00412990`（`mem 0x27B8`，返回 `EAX`=宿主），站点 `0x4228BE`/`0x4229D2`（`"main"`@`0x49FE14`），宿主线程链 `H+0x1030`↔`H+4`（`FUN_00411E40`/`FUN_00468D90`），静态兜底 `*(u32*)(*(u32*)(mgr+0x68))`；**Q5（全新自找）** 命中点 **`0x4671A0`**（6B，`EDI`=执行对象 T），函数 `FUN_00467170`（`0x467170`–`0x468C37`），跳表 `0x468C38`/映射 `0x468D30`，opcode 上界 `0x59`，`>0x59` 委派 `0x468BD9`；**Q6** 运行期保留名字（需地址区间反查）；**Q7** `CHARA=0x4B0C90`、`SUBSHOT=0x4B0C94`、`STAGE_NUM=0x4B0CB0`、`MODEFLAGS=0x4B0CE0`、`PLAYER_PTR=0x4B4514`、`REPLAY_MGR_PTR=0x4B4518`；**Q8** `ECLJump` 只写 `goto`(`0x0C`)，只改 `T+0`/`T+4`；**Q9** 路过式 checkpoint（latch），**读取面 = 宿主线程链 `H+0x1030` 全体线程**（因段落 sub 由 opcode `0x0F` 异步派生）。**关键订正**：(a) requests §1 的 `ECLCallSub` 在 th12 是**死代码**且布局与真实 `call` 指令头不符（见 §9.3）；(b) requests §6 的切入点建议改为「SCPT 魔数 → 加载器 → res/表；`"main"` → 宿主工厂；`disp 0x1008` 密集区 → VM/spawn/驱动器」（见 §6.4）；(c) 总括 §4 建议把 B 代细分 B1(th12/th13)/B2(th10/th11)（见 §11.2）。证据：`capstone` 只读反汇编（自写 `D:\workshop\reasm\th12\dl.py`）+ 全程序字节/交叉引用扫描 + `.ecl` 容器离线解码（`stage01`/`stage02`）。**未真机三态；段落入口白名单待枚举（阶段 E3/E4）。** |
+| 2026-10-17 | **§10.4 收口（+ §0 Q9 行状态同步）**：段落入口白名单由「未定论 / 待枚举」改为 **✅ 已枚举完毕（2026-10-17）** —— `docs/logger/th12_checkpoints.csv` 第 1 列 **114/114**（章节 43/43、boss 71/71）；§10.4 第 4 条「`portion 1` 入口待定」**定案 = `MainSub00`（各关一致）**；「`ECLJump`（非 `Ex`）形态的段」确认在本作**不存在**（本作 warp 一律 `ECLJumpEx`，`ECLJump` 0 次调用）。**新建 `docs/th12/th12_checkpoint_entry_report.md`**（入口表小结）：入口表（章节/boss 分组）+ 相位链 + 本作特有两条机制（① 两个 warp API：`ECLJump` 无 `dest` / `ECLJumpEx` 的 `dest` 才是落点；② boss 行不适用「`stNNbs`/`stNNmbs` + `$SPELL_ID`」——无独立 boss 脚本文件、无 `$SPELL_ID`，靠改容器 `call` 名字串 + 改 `lifeSet` 操作数）+ `ST6 BOSS9/BOSS10 = BossCard5/BossCard6`（修正）+ 实现影响（async 派生线程 ⇒ 必须遍历宿主线程链 `H+0x1030`；boss 容器独立宿主 `enmCreateA` ⇒ 过渡 sub 风险）+ 风险清单。**未真机（🟡）**。 |

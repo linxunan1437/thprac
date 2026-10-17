@@ -51,6 +51,7 @@ CSV 是**路过式 checkpoint（latch）白名单表**：
   - 例：th16 ST1 `ecli = {default, st01bs, st01mbs}` → slot1=default、slot2=st01bs、slot3=st01mbs。
   - 例：th16 ST5 `ecli = {default, st05mbs, st05bs}` → slot2=st05mbs、slot3=st05bs（**顺序逐关不同，务必按 `ecli{}` 读**）。
 - thprac 的 `ECLJump(start, dest, at_frame, ecl_time)`：在 `start` 处写一条 `goto(0x0C)`，**`dest` 才是落点**；`start`/`dest` 都是**当前槽文件内的字节偏移**。
+  > ⚠️ **函数名逐作不同**（2026-10-17 补）：带 `dest` 的那个在 **th12** 叫 **`ECLJumpEx(ecl, start, dest, at_frame, ecl_time)`**；th12 里名为 `ECLJump(ecl, start, ecl_time, length)` 的**没有 `dest`**（原地向前跳过 `length`，是段内补丁、不产生入口）。**认函数看签名，不要看名字**。
 
 ### 3.2 `.ecl` 结构（解析用）
 
@@ -77,19 +78,30 @@ CSV 是**路过式 checkpoint（latch）白名单表**：
 
 规则：
 
-1. 该段**最后一条** `ECLJump` 的 `dest` → 解析成指令：
+1. 取该段**「落点会等待」的那一条** `ECLJump` 的 `dest` → 解析成指令（**2026-10-17 修订**；原写「最后一条」，会误取段内时间跳跃）：
    - 是 `call`/`async call` → 填**被调者名字**；
-   - 否则（如直接是某数据的落点）按 §3.4 处理。
-2. 该段**没有第二条** `ECLJump`（含 portion 1）→ 落在第一跳指向的容器（`MainFront`/`MainLatter`）里，填**该容器里第一个 `call MainSubNN` 的被调者**。
-3. **async 落点照挂**：`async call`（`0x0F`）的被调者**照样填**，不因为它跑在异步线程就跳过。
+   - **不是 `call`** → 填**包含 `dest` 的那个 sub**；若该 sub 是容器 `main` ⇒ 见规则 5；
+   - 否则按 §3.4 处理。
+   > **判据（2026-10-17 新增）**：设 `t_land` = 落点指令的 `time`、`at_frame` = `ECLJump` 的第 4 参。
+   > `t_land > at_frame` ⇒ 解释器在落点**等待** ⇒ 该 jump 是**段落入口**；`t_land ≤ at_frame` ⇒ 落点被**快进跑穿**、帧边界观测不到 ⇒ 那是**段内时间跳跃**，不是入口。
+2. **只跟随「`start` 落在当前链那个 sub 内」的 jump**（**2026-10-17 新增**）：同段常有多条 `ECLJump`，其中有些打在**别的 sub / 别的宿主**的派生器上（辅助补丁），照字面取会得到重复或错误的入口。
+3. 该段**没有**上述 `ECLJump`（含 portion 1）→ 落在第一跳指向的容器（`MainFront`/`MainLatter`）里，填**该容器里第一个 `call MainSubNN` 的被调者**。
+4. **async 落点照挂**：`async call`（`0x0F`）的被调者**照样填**，不因为它跑在异步线程就跳过。
+5. **入口落在容器 `main` 内部、拿不到唯一 sub 名时**（**2026-10-17 新增**）：改用 **`sub名+0x偏移`** 二级粒度登记 —— 偏移 = **相对该 sub 首条指令**的文件偏移（小写十六进制，无空格），例 `main+0x28`、`MainSub08+0x390`。运行期按 `(sub 名, 偏移)` 匹配，偏移命中优先。详见 `docs/th10/th10_checkpoint_ip_offset.md`。
 
 > 记录名 ↔ portion 的换算由 `mChapterSetup[7][2] {前半,后半}` 决定：`后半==0` → `STn #k`；否则 `k≤前半 → STn 前半 #k`，`k>前半 → STn 后半 #(k−前半)`。
 
-### 3.4 boss 行取值规则（`THPatch`，warp 模式 2/3）——**暂缓**
+### 3.4 boss 行取值规则（`THPatch`，warp 模式 2/3）——**已落地（2026-10-17）**
 
 - `THPatch` 的主跳转（slot 0）落在 `main` 的 `call MainBoss` / `enmCreateA "Boss"/"MBoss"` 上；**这不能唯一区分第几个 boss 段**。
-- 真正区分在 `SetFile(2/3/4)` 对 boss 脚本文件（`stNNbs`/`stNNmbs`）的补丁 + `$SPELL_ID` 派发 → 入口应是 **boss 脚本 sub**（`Boss`/`Boss1`/`BossCard1`/`MBoss` 等）。
-- 需额外解码 `Boss`/`MBoss` 内的 `$SPELL_ID`/ordinal 派发，**本轮未做**。
+- 入口登记 **boss 脚本的战斗 sub**（`Boss1`/`BossCard1`/`MBoss`/`MBossCard1`…）；**顶层容器 `Boss()`/`MBoss()` 不作为入口**。
+- **逐行定法（纯离线，th10–th18 通用）**：把 `THPatch` 对该 case 的补丁应用在 `.ecl` 字节副本上，看它落到 boss 脚本的哪一条指令：
+  1. **改名字串**：`Boss()`/`MBoss()` 内那条 `call Boss1`/`call MBoss1` 的**名字串**被 `pair{off,'K'}` 原地改成 `BossK`/`BossCardK` ⇒ 入口 = 改后的被调者；
+  2. **改 `lifeSet` 操作数 / `setNext` 的 hp 阈值** ⇒ 该相位**立刻**转移到 `setNext` 的目标 sub ⇒ 入口 = 那个目标（通常是符卡）；
+  3. 两者都没有 ⇒ `$SPELL_ID = -1` 默认分派 ⇒ `Boss1` / `MBoss1`。
+- **交叉验证**：boss 脚本自身的 `setNext` 相位链（`Boss1 → BossCard1 → Boss2 → …`）+ `.decl` 的 `spell()` 名 + thprac 自己的 `th_sections_cbt`（非符/符卡分栏）三者对齐。
+- **不需要** boss ECL 宿主 / 槽表 / 门控位 —— 那些只在**运行期读当前 sub**（实现监控）时才需要，**不阻塞白名单枚举**（2026-10-17 订正）。
+- **B 代例外（th12 型）**：无独立 boss 脚本文件、无 `$SPELL_ID`，相位全靠上述 ①②；`SetFile(2..7)` 的分支脚本（如 th11 st4 六机体）**每支各自登记入口**（见 §5「分支关」）。
 
 ---
 
@@ -159,7 +171,8 @@ def calls_in_sub(d, names, offs, name):
 - **async 落点**：照挂（例：th16 ST1 前半#2=`MainSub01b`、ST1 后半#2=`MainSub05`、ST2 #1=`MainSub00b`、ST2 #4=`MainSub05`）。
 - **无第二条 `ECLJump` 的段**：含每个 `p1`，以及“第一条直接进 `MainLatter`”的段（th16 的 ST1 p3、ST3 p5、ST4 p4、ST5 p6、ST7 p5）→ 取容器首个子，**不要**填容器名。
 - **同名 sub 二次出现**：个别作 `MainLatter` 会再次 `call MainSubNN`（如 th16 ST2）；本流程只取“入口那一个”，不涉及“区间划界”，故无歧义；若日后要枚举区间，请**按 call 目标索引**而非名字来划界。
-- **`dest` 落在非 `call` 指令**：属 boss 行范畴（如 `enmCreateA`），本轮不处理（§3.4）。
+- **`dest` 落在非 `call` 指令**：**2026-10-17 起处理** —— 章节行取**包含 dest 的 sub**（§3.3 规则 1）；boss 行按 §3.4（如落点是 `enmCreateA "Boss"`，则跟到 boss 脚本的战斗 sub）。
+- **`goto` 有多个 opcode**（2026-10-17 新增，th13 全 21 份 `.ecl` 实测）：**`0x0C` = 无条件 goto**（817 条，全前跳）、**`0x0D` = `unless (cond) goto`**（349 条，全前跳）、**`0x0E` = `if (cond) goto`**（608 条，全后跳），三者布局一致（`+0x10` = 相对目标）。**thprac 注入的恒为 `0x0C`** —— 离线解析只认 `0x0C` 会**失步**（须至少认 `0x0C`/`0x0D`/`0x0E`）。
 - **文件槽顺序**：`SetFile(N)` 的含义**逐关不同**，一律以该关 `.decl` 的 `ecli{}` 为准。
 - **分支关**（th11 st4 / th14 st4 / th16 st5）：本口径读的是**运行期状态**，分支天然兼容；只需白名单**同时收录两条分支各自的入口**。
 
@@ -168,7 +181,7 @@ def calls_in_sub(d, names, offs, name):
 ## 6. 自检清单
 
 - [ ] 章节行数 == Σ(各关 `mChapterSetup` 的 前半+后半)；与 `checkpoint_csv_workflow.md` §3 一致。
-- [ ] 每行恰 1 个函数名（无空、无多值、无容器名 `main/MainFront/MainLatter`）。
+- [ ] 每行恰 1 个入口：**纯 sub 名**，或 **`sub名+0x偏移`** 二级粒度（2026-10-17 起允许，见 §3.3 规则 5）；无空、无多值、无容器名（`main`/`MainFront`/`MainLatter`）单独出现。
 - [ ] 每个入口 ∈ 该关主 `.ecl` 的 sub 名集合。
 - [ ] 入口与该段 `THStageWarp` 偏移**一一对应**（可写脚本重跑比对）。
 - [ ] async 落点未被跳过（对照 §5 名单）。
@@ -226,3 +239,4 @@ def calls_in_sub(d, names, offs, name):
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-15 | 建档。整合本轮（th16）**正确**回填流程：口径＝路过式 checkpoint（latch）；取值＝warp 落点所进入的 `call/async call MainSubNN`（async 照挂）；给出 `.ecl` 解析、步骤、参考脚本、自检与边界；§7 登记已废弃的「调用栈祖先 / 一段多 sub」写法。示例＝th16 章节行 39 行（已回填 `docs/logger/th16_checkpoints.csv`）。boss 行流程暂缓（§3.4）。 |
+| 2026-10-17 | **按 th10–th13 全表回填的实际口径收口**：**§3.3** 规则 1 由「取最后一条 `ECLJump`」改为「取**落点会等待**（`t_land > at_frame`）的那一条」，并新增「`dest` 非 `call` ⇒ 取包含 dest 的 sub」「只跟随 `start` 落在当前链 sub 内的 jump」「入口落在 `main` 内部时用 `sub名+0x偏移` 二级粒度」三条（§3.3 规则 1/2/5）；**§3.4** boss 行由「暂缓」改为**已落地**，写明纯离线定法（改名字串 / 改 `lifeSet` 逼 `setNext` / 默认分派）与「不需要 boss 宿主锚点」；**§5** 补 th13 `goto` opcode 为 `0x0D`（thprac 注入才是 `0x0C`）的注记；**§6** 自检放宽为「纯 sub 名 或 `sub名+0x偏移`」。 |

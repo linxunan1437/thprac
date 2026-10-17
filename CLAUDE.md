@@ -62,7 +62,7 @@
 **逐作逆向**
 
 - `docs/th10/th10_ecl_re_requests.md` … `docs/th18/th18_ecl_re_requests.md`（需求）
-- `docs/th13/th13_ecl_re_report.md` … `docs/th18/th18_ecl_re_report.md`（结论；th10–th12 报告待补）
+- `docs/th10/th10_ecl_re_report.md` … `docs/th18/th18_ecl_re_report.md`（结论，九作齐全；th10–th13 的入口表小结另见 `docs/thXX/thXX_checkpoint_entry_report.md`）
 
 ---
 

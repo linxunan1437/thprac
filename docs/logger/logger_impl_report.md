@@ -22,7 +22,7 @@
 | checkpoint 字段 | 只有「启动」与「结束」两个（需求 §5 的「最后checkpoint」与「结束checkpoint」合并，用户 2026-10-17 定案） |
 | 强退进程 | 主动放弃记录，不处理（用户 2026-10-17 定案） |
 | 落盘位置 | `GameSession::Tick()` 里，**一局至多一次** |
-| 代码量 | 共享模块 2 文件（新增 region，不加新文件）；五作各 8 处调用，逐字同构 |
+| 代码量 | 共享模块 2 文件（新增 region，不加新文件）；五作各 8 处调用，逐字同构；**th17 另有第 9 处**（`break` / 撞咆哮，非逐字同构） |
 | 工程文件 | **不需要**改 `thprac.vcxproj` / `.filters`（无新文件） |
 
 ---
@@ -69,7 +69,7 @@ thprac 的 `EHOOK` 是 **INT3 + VEH 同步回调**，跑在触发指令的游戏
 | `startCheckpoint` | string | 本局**首次** latch 到的记录名；一次都没 latch 则 `"main"` |
 | `endCheckpoint` | string | 本局**最后一次** latch 到的记录名；同上兜底 `"main"` |
 | `checkpointCount` | int | latch 次数（含启动 checkpoint，即首次 latch 记 1）。等价读法：`checkpointCount - 1` = 启动之后又经过了几段 |
-| `events` | array | `{type, checkpoint}`；`type ∈ {"miss","bomb"}`；`checkpoint` = 事件发生时 IGI 面板显示的段落（未 latch 前为 `"main"`） |
+| `events` | array | `{type, checkpoint}`；`type ∈ {"miss","bomb","break"}`（**`break` 仅 th17 产出**，= 撞咆哮）；`checkpoint` = 事件发生时 IGI 面板显示的段落（未 latch 前为 `"main"`） |
 | `eventsDropped` | int | **仅在 >0 时出现**；`events` 溢出 256 后被丢弃的条数 |
 
 固定字段顺序（writer 决定）：`game, start, shot, startCheckpoint, endCheckpoint, checkpointCount, events[, eventsDropped]`。读取端按 key 取值，不依赖顺序（吸取 `ParseGameSessionLine` 里 `durationNs` 用 `strstr` 定位的教训，`thprac_launcher_others.cpp:171-173`）。
@@ -118,7 +118,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 
 ## 4. 逐作接线
 
-每作 **8 处**改动（逐字同构，只差文件号、`PLAYER_PTR` 值与机体表达式）：
+每作 **8 处**改动（逐字同构，只差文件号、`PLAYER_PTR` 值与机体表达式）；**th17 另有第 9 处**（撞咆哮 → `OnBreak()`，见下表末行）：
 
 | # | 位置 | 改动 |
 | --- | --- | --- |
@@ -130,6 +130,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | 6 | `THxxLogger::Update()` 体末 | `mSession.Latch(GameLogRecordOfSection(mSection));` |
 | 7 | `thxx_bomb_dec` EHOOK 的**既有 lambda 体内** | `THxxLogger::singleton().OnBomb();` |
 | 8 | `thxx_life_dec` EHOOK 的**既有 lambda 体内** | `THxxLogger::singleton().OnMiss();` |
+| 9 | `th17_roar_break` EHOOK 的**既有 lambda 体内**（`thprac_th17.cpp:3063`） | `TH17Logger::singleton().OnBreak();`（**仅 th17**；事件 `break` = 撞咆哮） |
 
 ### 4.1 逐作差异
 
@@ -138,7 +139,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | th14 | `TH14Logger` | `0x4DB67C` | `S(IGI_PL_14[static_cast<byte>((*(i32*)0x4f5828))*2 + (*(i32*)0x4f582c)])` | `th14_bomb_dec` `0x41218A` | 采样机制是「指令指针 → sub 名」（`BuildIpMap`/`NameOfIp`），与其余四作不同；`OnStageStart()` 另有 `mIpMapCount/mIpMapTable` 复位 |
 | th15 | `TH15Logger` | `0x4E9BB8` | `S(IGI_PL_15[static_cast<byte>(*(i32*)0x4E7404)])` | `th15_bomb_dec` `0x41497A` | mid-boss 收尾状态是 `mMidBossDoneRecord`（记录名）而非 bool |
 | th16 | `TH16Logger` | `0x4A6EF8` | `std::format("{}{}", S(IGI_PL_16[*(i32*)0x4A57A4]), S(IGI_PL_16S[*(i32*)0x4A57AC]))` | `th16_bomb_dec` `0x40DB9C` | **唯一双数组拼接**（机体 + 子机），需 `std::format` 临时对象；`Tick` 在同一全表达式内复制完，无悬垂 |
-| th17 | `TH17Logger` | `0x4B77D0` | `S(IGI_PL_17[(*(i32*)0x4B59F4))*3 + (*(i32*)0x4B59F8)])` | `th17_bomb_dec` `0x411CAB` | — |
+| th17 | `TH17Logger` | `0x4B77D0` | `S(IGI_PL_17[(*(i32*)0x4B59F4))*3 + (*(i32*)0x4B59F8)])` | `th17_bomb_dec` `0x411CAB` | **唯一有第 9 处**：`th17_roar_break` `0x40F880`(10B) 既有 lambda 内 → `OnBreak()`（撞咆哮；同址不新增 EHOOK） |
 | th18 | `TH18Logger` | `0x4CF410` | **无**（传 `nullptr`） | `th18_bomb_dec` `0x4574D3` + `th18_cylinder` `0x410F22` | IGI 无 `diff_pl` 行、机体地址未登记；**bomb 有两个递增点，两处都挂了 `OnBomb()`**，否则 JSON 条数会少于 IGI 面板 |
 
 ### 4.2 两个必须遵守的接线约束
@@ -153,7 +154,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | `OnStageStart()`（`*_game_start` 钩子内） | INT3 + VEH 同步回调，游戏线程 | 是 | **否** | 否 |
 | `Update()` 顶部（`Tick`） | 同一个每帧派发 EHOOK 的 VEH 回调 | 是 | 可以（同处已在做 ImGui / `std::format`；先例：`th16_rep_save` 在 VEH 里调 `THSaveReplay` → `ReplaySaveParam` → `CreateFileW`） | **可以**（一局一次） |
 | `Update()` 末尾（`Latch`） | 同上 | 是 | 不需要（纯指针比较 + `strcmp`） | 否 |
-| `OnMiss()` / `OnBomb()`（`*_life_dec` / `*_bomb_dec` 钩子内） | INT3 + VEH 回调，事件触发即进 | 是 | **禁止** | **禁止** |
+| `OnMiss()` / `OnBomb()` / `OnBreak()`（`*_life_dec` / `*_bomb_dec` / `th17_roar_break` 钩子内） | INT3 + VEH 回调，事件触发即进 | 是 | **禁止** | **禁止** |
 
 ---
 
@@ -167,7 +168,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | **`*_game_start`** → `OnStageStart()` → `Begin("thXX")` | ① 若 `mOpen`：`mPending = mCur; mHasPending = true;`（覆盖「重开 / 直接换局」）② `mCur = {}` ③ `mOpen = true` ④ `mWasInGame = false` | **零** |
 | **首次 latch** → `Latch(record)` | `startCheckpoint = endCheckpoint = record`，`checkpointCount = 1` | 零 |
 | **后续 latch（记录名变化）** | `endCheckpoint = record`，`++checkpointCount`（同一记录名重复命中不算，用 `strcmp` 比对以容忍 CSV 同名行） | 零 |
-| **miss / bomb** → `PushEvent(type, mSection)` | `events[eventCount++] = {type, mSection}`；满则 `++droppedEvents` | 零 |
+| **miss / bomb / break** → `PushEvent(type, mSection)` | `events[eventCount++] = {type, mSection}`；满则 `++droppedEvents` | 零 |
 | **`PLAYER_PTR` 由非 0 变 0** → `Tick(false)` | `mPending = mCur; mHasPending = true; mCur = {}; mOpen = false` | 零 |
 | **落盘** → `Tick()` 末尾 | 若 `mHasPending`：序列化 `mPending` → 追加写月度文件 → 清空 | **堆 + 文件 IO（一局一次）** |
 | **强退进程** | 不落盘（主动放弃） | — |
@@ -198,6 +199,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 4. 正常退出游戏：最后一局已落盘。
 5. th14 / th15 / th17 / th18 各跑一次最小流程（启动 → 打一段 → 退出）：五作行都写进同一文件、`game` 字段正确。
 6. 对照 IGI 面板的 miss/bomb 计数与 `events` 条数（**重点 th18 的 cylinder**）。
+7. **th17 的 `break`（撞咆哮）**：练习启动一局 → 触发 ≥2 次撞咆哮 + ≥1 miss + ≥1 bomb → 回菜单：`"type":"break"` 条数 == IGI 面板「撞咆哮」计数（`THPRAC_INGAMEINFO_17_ROAR_BREAK_COUNT`）；每条 break 的 `checkpoint` 与触发时刻 IGI「当前段落」一致（允许 §8 #4 的一帧延迟）。顺带确认该局无 `eventsDropped`（撞咆哮与 miss/bomb 共用 256 上限，见 `knownBugs.md` #3）。
 
 ---
 
@@ -230,3 +232,4 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-17 | 建档。共享模块 `thprac_games.{h,cpp}`（`#pragma region Game Session Log`）+ th14/15/16/17/18 各 8 处接线。口径：JSONL 一行一局、月度文件、一局边界 = `*_game_start` + `PLAYER_PTR` 下降沿、启动 checkpoint = 首次 latch、字段合并为「启动/结束」两个。**Release\|x86 编译通过；真机未测。** |
+| 2026-10-17 | **th17 新增 `break` 事件（撞咆哮）**：共享枚举 `GameLogEventType` 增 `Break`（`thprac_games.h`）；序列化由二元三元表达式改为 `GameLogEventTypeName()`（同文件内联；原三元表达式对任何非 `Miss` 值都输出 `"bomb"`，新增枚举值会**静默错标**，改 `switch` 后漏写 case 落到兜底输出显眼的 `"?"`——注意 MSVC 的 C4062 只在 `/Wall` 下报、本工程 `/W4` 不报，**编译器拦不住**，已实测确认；`thprac_games.cpp` 调用点局部变量仍名 `type` 以保 JSON key 不变）；`TH17Logger::OnBreak()` + `th17_roar_break`（`0x40F880`）**既有 lambda 体内**一行 `OnBreak()`（**同址不新增 EHOOK**，`instr_size` 不变）。th14/15/16/18 不受影响（`Miss`/`Bomb` 的输出逐字节不变）。**Release\|x86 编译通过；真机未测。** |
