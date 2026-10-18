@@ -19,6 +19,7 @@
 | 7 | **P2** | th14–th18 | 日志落盘的**单章节合并基线**（口径 11） | 基线是**纯内存态**，进程重启即失效（口径 11 明确定为不读回文件最后一行） | 关掉游戏重新启动后，同日同 section 再练会**另起一行**，`total` 从 1 重新计 | 暂不修。要跨进程合并需读回并解析文件最后一行，代价大于收益 |
 | 8 | **P2** | th16 | `IsStageClearSub` 的 `BossDeadB` | 该名字在 `st05bs` 是**关底 boss** 收尾、在 `st07mbs2` 是**中boss** 收尾（`enmCall($GI0,"MBossDeadp")` + `@MBossBDeadp()`），名字无法区分；且 `IsMidBossEndSub` 恰好用前缀 `BossDeadB` 认中boss，两条谓词同名冲突 | 若收录它，ST7 中boss B 路线击破会被误判成「本关已清」⇒ 该局退出时**漏记** interrupt | **已处理**：`IsStageClearSub` 排除它，`strcmp` 精确匹配其余 5 个名字。排除不损失覆盖 —— `st05bs` 侧由 60 帧的 `BossDeadBp` 兜住（同文件的 `BossDead`/`BossDeadB` 是 0 帧转发壳） |
 | 9 | **P2** | th16 | stageClear 的复位判据 | 复位挂在「`mSection` 变成另一个记录名」上；boss 宿主 `delete()` 之后，若仍有白名单命中的宿主 / 异步线程存活，`mSection` 会从 `"STn BOSSx"` **回退**到章节记录 ⇒ 触发一次复位 | 清关后立刻退到标题会**误报**一次 interrupt | 暂不修。静态看 th16 不成立（`stNN.decl` 的 `main()` 在 boss 战期间阻塞在**不在白名单**的 `MainBoss`；`MainLatter` 的 `@MainSub05() async` 约 700 帧即结束，远早于 `@MainBoss()`）。真机若复现，最小修法是「收尾后 N 帧内忽略复位」 |
+| 11 | **P2** | th15 | `IsStageClearSub` 的 `BossDeadB`（口径 12） | `st07bs2.BossDeadB` 的 body 与 `st07bs.BossDead` **形状完全一致**（`enmKillAll()` → `+60:` → `setBoss(-1)` → `delete()×2`），静态**无法**从 body 区分「关底收尾」与「附属身体收尾」 | 若 `BossB` 其实是 ST7 的**独立路线**（而非附属身体），则清 B 路时权威收尾 `BossDead` 不跑 ⇒ 每次清 B 路都**误记**一条 `interrupt` | **暂不收录**（静态判为附属身体：`st07.decl:968/969` 两条 `enmCreateA("Boss","BossB")` 之间无条件跳转 ⇒ 同时在场；th15 的 ST7 白名单也无任何 B 路线记录）。**真机确认：清完 ST7 后退出应无 `interrupt`**（`logger_impl_report.md` §7 验证项 20）。若复现，把 `BossDeadB` 加进 th15 清单即可 |
 | 10 | **P2** | th14–th18 | 单章节判据跨作不对称（口径 13 的代价） | 口径 13 的判据 `(cpCount==2 && 含interrupt) \|\| (cpCount==1 && 含miss/bomb/break)` 里，第一个子句依赖 `interrupt`，而 th14/15/17/18 永不产出 `interrupt` | 四作「干净走完两段（`cpCount==2` 且无任何事件）」的练习局**不再合并**，改前会合并 ⇒ 四作的日志行数变多 | **用户 2026-10-18 定案接受**（判据由共享层统一，不按作分叉）。若日后要恢复，最小改法是给第一个子句加一条「无任何事件」的旁路：`cpCount==2 && (含interrupt \|\| eventCount == 0)` |
 
 ---
@@ -64,3 +65,4 @@
 | 2026-10-18 | 追加单章节练习合并（口径 11）相关的 2 条：#6 就地改写 `IoFailed` 时的撕裂行残留（P2）、#7 合并基线不跨进程（P2）。 |
 | 2026-10-18 | 追加 stageClear / `interrupt`（口径 12，仅 th16）相关的 3 条：#8 `BossDeadB` 的同名歧义（已按排除处理）、#9 关底收尾后 `mSection` 回退导致误复位（静态不成立，未真机）、#10 `interrupt` 计入 `eventCount` 导致单章节练习的 `got` 语义变化。 |
 | 2026-10-18 | #10 随**口径 13** 改写：判据已修订（`got` 不再受 `interrupt` 影响），剩余项改为**跨作不对称**——th14/15/17/18 的 `cpCount==2` 干净练习局不再合并（定案接受，附旁路改法）。 |
+| 2026-10-18 | 口径 12 推广到 th14/15/17/18 后追加 **#11**：th15 的 `BossDeadB` 判定是五作里**唯一未能静态钉死**的一处（body 与关底收尾形状一致，但静态判为附属身体），登记待真机确认。 |

@@ -12,15 +12,11 @@
 
 - 源码：`thprac/src/thprac/**`（C++，MSVC 工程 `thprac.sln`）。
 - 文档：`docs/**`（需求 / 方案 / 逐作逆向 / 数据）。
-- 仓库外的只读素材：`../exes/`、`../th15decode/` —— **不进 git，不要提交**。
+- 仓库外的只读素材：`../exes/` —— **不进 git，不要提交**。
 
 ---
 
 ## 1. 环境与工具约束（重要）
-
-- 当前开发机是 **macOS（Darwin / arm64）**：
-  - **无法编译**本仓库（MSVC / `windows.h`），也**无法真机运行 / 验证** Windows 游戏。
-  - 因此在本机上**默认只做只读逆向与文档产出**；如需改 `thprac/src/**` 的 C++，先说明「本机无法编译验证」。
 - 编译 / CI 只发生在 Windows：`.github/workflows/main.yml`（`windows-latest` + MSBuild，仅 `master` push 触发）。
 - 本机可用的逆向手段：`python` + `pefile` + `capstone`（x86-32 只读反汇编）、离线 ECL 解码。
 - 素材清单与来源见 `docs/logger/decompile_materials.md`。
@@ -66,7 +62,7 @@
 **逐作逆向**
 
 - `docs/th10/th10_ecl_re_requests.md` … `docs/th18/th18_ecl_re_requests.md`（需求）
-- `docs/th13/th13_ecl_re_report.md` … `docs/th18/th18_ecl_re_report.md`（结论；th10–th12 报告待补）
+- `docs/th10/th10_ecl_re_report.md` … `docs/th18/th18_ecl_re_report.md`（结论，九作齐全；th10–th13 的入口表小结另见 `docs/thXX/thXX_checkpoint_entry_report.md`）
 
 ---
 
