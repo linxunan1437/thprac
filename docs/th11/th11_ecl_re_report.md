@@ -27,6 +27,9 @@
 | **Q7 机体 / 子机** | 🟡 **给出现有地址（沿用 thprac，未真机核对）** | `mainShot = *(u32*)(*(u32*)0x4A8ECC + 0x38)`、`subShot = *(u32*)(*(u32*)0x4A8ECC + 0x3C)`（`thprac_th11.cpp:175-176` 既有用法）。难度 `*(i32*)0x4A5720`。 |
 | **Q8 ECLJump** | ✅ **不影响判读（分支关亦成立）** | `ECLJump` 只把 `goto`(`opcode 0x0C`) 写进**选定槽位**的运行期缓冲；`goto`(case `0x0C` @ `0x45BAC2`) **只改 `T+0`(时间) 与 `T+4`(ip)**。⚠️ 分支关下偏移是**相对该槽位文件**的，故 st4 boss 段 thprac 会先 `ecl.SetFile(2/3/…)`；对**监控**无影响。 |
 | **Q9 段落判定口径** | ✅ **路过式 checkpoint（latch）** | CSV 即白名单：当前 sub（经 Q2 地址区间表把 `T+4` 映射回名字）∈ 表 → 置当前段落；**不在 → no-op**（不回退 `main`）。**每 checkpoint 只登记 1 个入口函数**（含 async 落点）。**段落入口白名单已于 2026-10-17 枚举完毕**（CSV 第 1 列 **125/125**；逐行入口见 `docs/th11/th11_checkpoint_entry_report.md`）。⚠️ **本作大量入口是 `async` 落点**，实现需考虑线程选择（见 §10.5）。 |
+| **Q-A 宿主链是否覆盖 boss 宿主？** | ✅ **覆盖**（全局全宿主链） | `mgr+0x68` 是**本局全部 ECL 宿主**的双向链（工厂 `FUN_004108F0` 体内**尾插**、析构 `FUN_00410B60` 摘链、复位 `FUN_0041F880` 清空）；而**唯一的宿主创建路径**就是该工厂（其构造 `FUN_004111C0` 全程序**仅一处**调用点 `0x410915`）⇒ **boss 宿主也在链内** ⇒ **遍历 `node=*(u32*)(node+4)` 即达，不需要新捕获点**。 | 
+| **Q-B boss 宿主捕获点** | ✅ **给出**（3 处 `enmCreate` 族 + 2 处特例） | boss/中boss/敌人宿主**主力创建点 = `0x413044`**（`EAX` = 新宿主；名字 = ECL 指令内嵌名 `ins+0x14`；覆盖 opcode `0x100`/`0x101`/`0x10A`）；另有同族的 `0x4131D2`（未用分支）、`0x4132C0`，以及 `0x40D878`（`table[idx]` 取名）、`0x418508`（硬编码 `"MBossCard2_at2"`）。见 §5A.2。 | 
+| **Q-C boss sub 是否与主线同表？** | ✅ **同表** | 所有宿主构造时**无条件**写 `H+0x102C = *(mgr+0x64)`（`0x4113BB`）⇒ **只有一份 res**（`res` 是独立对象，vtable `0x49404C`）；stage 文件 `ecli` 头列出的 `stageNNboss/mboss.ecl`、`stage4c0*{a,b,c}.ecl` 经 `FUN_00410D50` 按名逐条触发加载、由 `FUN_0045D900`（SCPT 加载器，`ecx`=res）并入**同一张** `res+0x8C`（thprac `SetFile(2..7)` 可用即证）⇒ boss sub 全在表内。见 §5A.3。 |
 
 > **关键地址（VA / RVA）**：
 > ECL 主解释器 `FUN_0045B860` = `0x45B860`/`0x5B860`（体 `0x45B860`–`0x45D2C4`）；分发头 `0x45B890`/`0x5B890`；
@@ -576,6 +579,148 @@ sub 0 BGirl00  off=0x498  bytes[0:0x20] = 45 43 4c 48 | 10 00 00 00 | 00 00 00 0
 
 ---
 
+## 5A. boss 宿主可达性（Q-A / Q-B / Q-C）
+
+> 背景：`docs/logger/logger_progress.md` §4 第 11 条指出，th10–th13 的 **boss 行**要真正跑起来，需补「boss 宿主 / 线程链」的逆向锚点 —— 因为 Q4 给的是**主线宿主捕获点**（`"main"` 的 spawn 站点 `0x4204A3` / `0x4205E0`），而 boss 是**另一个 ECL 宿主**（由 `enmCreate` 另起）。
+> **本节结论：缺口不成立（不需要新捕获点）** —— 宿主链表 `mgr+0x68` 是**全局全宿主链（含 boss）**，遍历它即可拿到 boss 宿主；boss 宿主的 `res` 就是**同一个全局 res**，boss sub 与主线 sub 同处 `res+0x8C` 一张表。
+> 置信度：**🟡 静态定案（未真机）**。方法 = `capstone` 只读反汇编 + 全程序 `call rel32` / 字节模式扫描 + `../exes/ecl/th11/*.ecl` 逐指令解码与 `*.decl` 对账。
+> 编号说明：为避免改动既有交叉引用（§10.4 / §13 等），本节插为 **§5A**，不重排后续章节。
+
+### 5A.1 Q-A —— 宿主链表**覆盖** boss 宿主（✅ **全局全宿主链**）
+
+**结论**：`mgr+0x68`（`GetHostListHead()` @ `0x410540`）是一条**双向链表，登记本局全部 ECL 宿主** —— 含 `main` 与所有由 `enmCreate` 派生的 boss / 中boss / 敌人宿主。⇒ **遍历该链即可拿到 boss 宿主，不需要新捕获点。**
+
+**判据 1：唯一的宿主创建路径 = 宿主工厂 `FUN_004108F0`，且「插链」就写在工厂体内。**
+
+```asm
+00410ac1  8d8da4110000      lea   ecx, [ebp + 0x11a4]          ; ★ 节点 = H+0x11A4
+00410ac7  397868            cmp   dword ptr [eax + 0x68], edi   ; edi = 0；链为空？
+00410aca  7515              jne   0x410ae1
+00410acc  017070            add   dword ptr [eax + 0x70], esi   ; 计数++
+00410acf  017074            add   dword ptr [eax + 0x74], esi
+00410ad2  894868            mov   dword ptr [eax + 0x68], ecx   ; head = node
+00410ad5  89486c            mov   dword ptr [eax + 0x6c], ecx   ; tail = node
+00410ad8  8bc5              mov   eax, ebp                      ; 返回 H
+...
+00410ae1  8b506c            mov   edx, dword ptr [eax + 0x6c]   ; ★ 非空 → 尾插
+00410af4  894a04            mov   dword ptr [edx + 4], ecx      ; tail.next = node
+00410afc  895108            mov   dword ptr [ecx + 8], edx      ; node.prev = tail
+00410b06  89486c            mov   dword ptr [eax + 0x6c], ecx   ; tail = node
+```
+`eax` = `mgr`（工厂开头 `0x4108F1: mov eax,[0x4A8D7C]`）。⇒ **工厂返回前必然把 H 挂进 `mgr+0x68` 链**（**尾插** ⇒ 链头恒为最先创建者）。
+**关键**：宿主构造函数 `FUN_004111C0` 的**唯一调用点**是工厂体内的 `0x410915`（全程序 `call 0x4111C0` 扫描：仅此一处）⇒ **不存在绕过工厂的宿主**，故**任何宿主（含 boss）都在这条链上**。
+
+**判据 2：这条链被通用代码当作「全宿主表」遍历**（不是主线专用）：
+- `FUN_0040D0C0`@`0x40D136`（ECL 复位）：`mov eax,[mgr+0x68]` → 逐节点 `mov ecx,[node]`(=H) → `call [H.vtbl+0x14]`（slot 5 = `0x410420` = 宿主析构 `→ FUN_00411480 → 0x410B60` 摘链）→ `mov eax,[node+4]`(=next)；遍历完 `mov [mgr+0x74],0`。
+- `FUN_00412990`@`0x412990`（寻敌/瞄准）：同型遍历，逐 H 读 `[H+0x25BC]` flags 与 `[H+0x1070]` 坐标。
+- `FUN_00417E70`@`0x417E75`（最近宿主搜索）：同型遍历。
+
+**判据 3：节点结构与生命周期**：
+- 节点 = `{ +0 = H, +4 = next, +8 = prev }`（节点 = `H+0x11A4`）；头 = `mgr+0x68`、尾 = `mgr+0x6C`、计数 = `mgr+0x70`（`0x410ACC` / `0x410B0C`）。
+- 摘链：`FUN_00410B60`@`0x410B6E`（`cmp [mgr+0x68],node` → `mov [mgr+0x68],node->next` …）。
+- 清链：`FUN_0041F880`@`0x41F8B8`（`mov [mgr+0x68],0` / `mov [mgr+0x6C],0`；调用点 `0x41FCD8`，ECL 复位路径）。
+
+**推论**：
+- 静态兜底 `H = *(u32*)(*(u32*)(mgr+0x68))` 取的是**链头 = 最先创建的宿主**（进关路径里即 `main`）—— 这正是「看起来只拿到主线」的原因；但**链本身是全宿主的**，`node = *(u32*)(node+4)` 即可达 boss 宿主。
+- ⇒ 监控实现**不需要**在 boss 宿主创建点下钩子：**遍历 `mgr+0x68` 链 × 每个宿主的线程链 `H+0x1030`**，对每个线程各判一次 latch（与 §10.5 的 async 处理合并）即可覆盖 boss 行。
+
+### 5A.2 Q-B —— boss 宿主的创建点（工厂 **7** 个调用点全表）
+
+`FUN_004108F0` 全程序共 **7** 个 `call rel32` 调用点，返回 `EAX` = 新宿主 H（均可挂 EHOOK）：
+
+| # | `call 0x4108F0`（VA / RVA） | 下一条指令（EHOOK 点，VA / RVA） | 长度 | 传入的名字 | 角色 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `0x42049E` / `0x2049E` | `0x4204A3` / `0x204A3` | 5B（`call 0x41A6D0`） | `"main"` @ `0x494258` | **主线宿主**（进关） |
+| 2 | `0x4205DB` / `0x205DB` | `0x4205E0` / `0x205E0` | 5B（`call 0x41A6D0`） | `"main"` @ `0x494258` | **主线宿主**（另一路径） |
+| 3 | `0x41303F` / `0x1303F` | `0x413044` / `0x13044` | 5B（`jmp 0x416BAE`） | **动态**：ECL 指令内嵌名 `ins+0x14` | **boss / 中boss / 敌人宿主**（`enmCreate` 族：opcode `0x100` / `0x101` / `0x10A` —— **本作主力创建点**） |
+| 4 | `0x4131CD` / `0x131CD` | `0x4131D2` / `0x131D2` | 5B（`jmp 0x416BAE`） | **动态**：`ins+0x14` | 同上（opcode `0x10E` / `0x10F` —— ⚠️ 该两 opcode 在 th11 的 20 份 `.ecl` 中**出现 0 次**，实为未用分支） |
+| 5 | `0x4132BB` / `0x132BB` | `0x4132C0` / `0x132C0` | 5B（`jmp 0x416BAE`） | **动态**：`ins+0x14` | 同上（opcode `0x104` / `0x10B` = `enmCreateM` / `enmCreateMF`，本作各 6 / 12 次） |
+| 6 | `0x40D873` / `0xD873` | `0x40D878` / `0xD878` | 7B（`mov [esi+0x30],4`） | 动态：`table[idx].+0`（`idx = *(u32*)(state+0x3C)`） | 关卡默认宿主（非 `main`） |
+| 7 | `0x418503` / `0x18503` | `0x418508` / `0x18508` | 6B（`add ebp,0x910`） | `"MBossCard2_at2"` @ `0x494038` | 条件触发的 MBossCard2 变体宿主 |
+
+**#3 / #4 / #5 是 boss / 中boss 宿主的主创建点** —— 三者都在**同一张「opcode > 0x58 委派处理器」**内（`0x412E30`；由解释器 `0x45D269` 对 `[T+0x1014]`=H 做 vtable slot 0 虚调用进入，slot 0 = `0x412E20` = `add ecx,0x103c; jmp 0x412E30`）。判据（以 #3 为例）：
+
+```asm
+; 解释器：opcode > 0x58 → 委派（§6.2）
+0045d269  8b8f14100000      mov   ecx, dword ptr [edi + 0x1014]   ; ecx = H
+0045d271  8b02              mov   eax, dword ptr [edx]            ; slot 0
+0045d273  ffd0              call  eax
+
+; 处理器 0x412E30：ecx = opcode − 0x100；字节映射 0x416DF0 / 跳表 0x416BD4
+00412e7e  0fb74704          movzx eax, word ptr [edi + 4]           ; opcode（edi = 当前 ECL 指令）
+00412e85  81c100ffffff      add   ecx, 0xffffff00                 ; ecx = opcode − 0x100
+00412e97  81f9c2000000      cmp   ecx, 0xc2
+00412e9d  0f870b3d0000      ja    0x416bae
+00412ea3  0fb689f06d4100    movzx ecx, byte ptr [ecx + 0x416df0]   ; 字节映射
+00412eaa  ff248dd46b4100    jmp   dword ptr [ecx*4 + 0x416bd4]    ; 跳表
+; 0x100 → 0x412EC1 ; 0x101 → 0x413059 ; 0x10A → 0x413049(→0x413059)
+; 0x10E → 0x4130EE ; 0x10F → 0x4130DE(→0x4130EE)
+; 0x104 → 0x4131E7 ; 0x10B → 0x4131D7(→0x4131E7)
+; 各分支读参数后汇到「取指令内嵌名 + 调工厂」：
+0041301c  8b442420          mov   eax, dword ptr [esp + 0x20]      ; ★ = 当前 ECL 指令（0x412E8F 存入 edi）
+00413020  83c014            add   eax, 0x14                       ; ★ ins + 0x14 = 名字串
+00413035  50                push  eax
+00413036  8d9c2498020000    lea   ebx, [esp + 0x298]              ; ebx = 0x50 字节参数结构（ctor 隐式入参）
+0041303f  e8acd8ffff        call  0x4108f0                        ; ★ 建宿主（名字 = ins+0x14）
+00413044  e9653b0000        jmp   0x416bae
+```
+- **名字 = `ins+0x14`**：与 §2.4 的 `call`/`async` 同构；离线对账 `stage01.ecl` 的 `0x10BB0`（`op=0x0101`，`ins+0x14` = `"MBoss"`）、`0x10D8C`（`op=0x0101`，`ins+0x14` = `"Boss"`）逐字段吻合（参数区起点 = `ins+0x14+ins[+0x10]`）。
+- **opcode ↔ decl 名对账**（全 20 份 `.ecl` 逐指令统计 vs `*.decl` 计数）：`0x100 = enmCreate`（256 次）、`0x101 = enmCreateA`（334）、`0x105 = enmCreateAM`（75）、`0x109 = enmCreateF`（22）、`0x10A = enmCreateAF`（52）、`0x10B = enmCreateMF`（12）、`0x10C = enmCreateAMF`（13）、`0x104 = enmCreateM`（6）⇒ **#3/#4/#5 全是 `enmCreate*` 家族**，即「按名另起一个 ECL 宿主」。
+- ⚠️ 入口表小结把 `0x10D8C` 记作 `enmCreate "Boss"`（`docs/th11/th11_checkpoint_entry_report.md` §3.3）—— 按 opcode 精确说应为 **`enmCreateA`**；被创建者名 `Boss` 不变，**不影响白名单口径**。
+
+**#6 / #7 说明**：
+- #6（`0x40D873`）：名字取 `table[idx].+0`（`idx = *(u32*)(state_obj+0x3C)`；`0x40D854: mov edx,[edi]` → `0x40D860: mov ecx,[eax+edx*8]`），是**从 sub 表按下标取名的关卡默认宿主**（`FUN_0040D600` 状态机 state 1 分支，前接 `call 0x40D0C0` 复位）。非 boss 直给。
+- #7（`0x418503`）：硬编码名 `"MBossCard2_at2"` @ `0x494038`（`FUN_00418460`；条件 = `[obj+0x64]&1` 且 `[obj+0x4B2]==1` 且 `[obj+0x90C]` 索引匹配），是 **MBossCard2 的 `_at2` 变体宿主**（该 sub 见于 `stage02/stage03/stage07mboss.decl`），**不是通用 boss 创建点**。
+
+### 5A.3 Q-C —— boss 宿主的 `res` 是**同一个全局 res**，boss sub 在同一张 `res+0x8C` 表（✅ **同表**）
+
+**结论**：**是**。th11 只有**一个** ECL 资源对象 `res = *(u32*)(mgr+0x64)`；**每个宿主**（含 boss）构造时都写 `H+0x102C = res`；stage 文件 `ecli` 头列出的 `stageNNboss.ecl` / `stageNNmboss.ecl` / `stage4c0*{a,b,c}.ecl` 都由加载器并入**同一张** `res+0x8C` 表 ⇒ **boss sub 名（`BossN` / `BossCardN` / `MBoss*` / `MBossCard*` / `BossCard*_0XY`）都在表内**。
+
+**判据 1：所有宿主共享同一个 res**（构造函数无条件写 `H+0x102C`）：
+
+```asm
+00411392  a17c8d4a00        mov   eax, dword ptr [0x4a8d7c]    ; mgr
+0041139d  8b4c2410          mov   ecx, dword ptr [esp + 0x10]  ; 脚本名（ctor 入参）
+004113b7  8b4064            mov   eax, dword ptr [eax + 0x64]  ; ★ res = *(mgr+0x64)
+004113bb  89872c100000      mov   dword ptr [edi + 0x102c], eax ; ★★ H+0x102C = res（无分支、无特例）
+004113c1  e84ac70400        call  0x45db10                     ; FindSubByName(res, name)
+004113c9  894204            mov   dword ptr [edx + 4], eax     ; T+4 = 该 sub 首指令
+```
+⇒ **boss 宿主的 `H+0x102C` 与主线宿主完全相同**（同一 `res`）。故「boss 宿主的 res 里有没有 boss sub」等价于「全局 res 的 `res+0x8C` 里有没有 boss sub」。
+
+**判据 2：`ecli` 兄弟文件被并入同一张 `res+0x8C`**：
+- **`res` 是一个独立对象**：vtable `0x49404C`（ctor `0x40FFC8: mov dword ptr [esi],0x49404c`，`malloc 0x1098`）；其 **slot 0 = `0x45D900`（SCPT 单文件加载器）**，`res+0x8C` 即 sub 表（析构 `0x40FFF6` / `0x410F6B` / `0x411016` / `0x411046` / `0x43880C` / `0x4388D6` 均 `mov [obj],0x49404c` + 释放 `[obj+0x8C]`）。⇒ 与宿主（vtable `0x494074`）是**两个不同类**，`res` 全局唯一（`GetRes() 0x40D0B0`）。
+- 每个 stage 文件的头部带 `ECLI` 块，列出本关要一并加载的兄弟 ECL 文件（实测：`stage01.ecl` = `{default.ecl}`；`stage04.ecl` = `{default, stage4c00a/b/c, stage4c01a/b/c}`；`stage05/06/07.ecl` = `{default, stageNNmboss.ecl, stageNNboss.ecl}`）。
+- 解析 `ANIM`+`ECLI` 头的代码 = **`FUN_00410D50`**（亦登记于 vtable `0x494074` 的 slot 8）：`cmp [edi],0x4D494E41`("ANIM") → 逐条 `call 0x454360`（动画，结果存 `mgr+0x44+i`）→ 对齐后 `cmp [ebx],0x494C4345`("ECLI") → 对每个文件名 `mov edx,[eax+8]; push <name>; call edx`（**每个 ECLI 条目一次虚调用**，即以文件名触发加载）。
+- 单文件加载器 = **`FUN_0045D900`**（SCPT 魔数 `0x54504353`；`__thiscall`，`ecx` = `res`）：把缓冲写进 `res + 0xC + slot*4`（slot = `*(u32*)(res+4)`），并 `add [res+8], n` + 把该文件的 n 个 sub **插入同一张 `res+0x8C` 有序表**（§3.3）。
+- **旁证（thprac 侧）**：`THSectionPatch()` 用 `ecl.SetBaseAddr(GetMemAddr(0x4A8D7C, 0x64, 0xC))`（= `res+0xC`）+ `ecl.SetFile(2..7)`（= `*(u32*)(res+0xC+slot*4)`）来改写 **st4 六机体分支文件**（`stage4c0*`）与 **st5–st7 的 boss / mboss 文件**（`thprac_th11.cpp:1479/1499/…/1585` 等）；该练习功能可用，即证明这些文件的缓冲确实落在 `res+0xC+slot*4`、其 sub 也确实进了同一张表。
+- ⚠️ 未定案：`FUN_00410D50` 里那条 `call [vtable+8]` 的**确切 `this`**（宿主还是 `res`）与逐文件加载的**完整调用链**未逐条追到（只确认到「以文件名触发一次虚调用」这一层）；**不影响**本条结论（`res` 唯一 + 加载器并入 `res+0x8C` 两条独立成立）。
+
+**判据 3：boss 宿主的线程链与主线同构**：boss 宿主同样由工厂创建（见 5A.1），构造时 `H+0x1030 = H+8`（线程链头 = 内嵌线程）、`T+0x1014 = H`（§5.2 / §5.3）⇒ 读 `T = *(u32*)(H+0x1030)`、`ip = *(u32*)(T+4)`、`NameOfAddress(table, ip)` 即可得 boss 宿主当前 sub（`Boss1` / `BossCard1` / `MBoss*` …）。
+
+**⚠️ 与入口表小结待真机清单第 5 条「多文件并集表」的关系**：本条即对该条的**静态回答**（并集表含 boss 文件 sub）—— 但「分支切换瞬间 `T+4` 的映射是否稳定」仍需真机（见 §13 / 入口表小结 §5）。
+
+### 5A.4 对「缺口」的裁定 + 实现建议
+
+- **裁定**：`logger_progress.md` §4 第 11 条所述的「boss 宿主 / 线程链锚点缺失」**不成立** —— 锚点即 **`mgr+0x68` 全局宿主链**（与主线同一条），**遍历即可**，**不需要新增捕获点**。
+- **实现建议（供 E5）**：把 §10.3 / §12 的读取链从「单个主线宿主」扩为「**遍历宿主链 × 遍历线程链**」：
+  ```cpp
+  count = *(i32*)(res + 8);  table = *(u32*)(res + 0x8C);     // res = *(u32*)(mgr+0x64)，全宿主同一份
+  for (node = *(u32*)(mgr + 0x68); node; node = *(u32*)(node + 4)) {   // ★ 全宿主（含 boss）
+      H = *(u32*)(node + 0);                                  // 节点 +0 = H
+      for (t = *(u32*)(H + 0x1030); t; t = *(u32*)(t + 4)) {   // 线程链（首节点 = H+8 主线线程）
+          T  = *(u32*)(t + 0);
+          ip = *(u32*)(T + 4);                                // 当前指令绝对地址（Q1）
+          cur = NameOfAddress(table, count, ip);              // 区间反查（§10.3）
+          if (section = Whitelist(game, stage, cur)) current = section;  // 命中置值；未命中 no-op
+      }
+  }
+  ```
+  （主线宿主捕获 `0x4204A3` / `0x4205E0` 仍可用作「本局是否已进关」的门控；**判读不必**区分主线 / boss。）
+- **与 §10.5 合并**：§10.5 的「async 线程选择」与本节的「宿主链遍历」是同一件事的两层 —— 合并为「宿主链 × 线程链」双重遍历即可。
+
+---
+
 ## 6. Q5 —— 解释器命中点 `0x45D2A3` 与寄存器语义
 
 ### 6.1 命中点（覆盖 2B 的指令语义）
@@ -848,3 +993,4 @@ else {
 | --- | --- |
 | 2026-10-16 | 建档（本报告）。静态定案 Q1–Q9。**Q1** `[T+4]` = **当前指令绝对地址（不是 sub 索引）**，与 th13 同构；写入点 `0x4113C9`/`0x45B814`/`0x45D283`/`0x45B8E9`/`0x45BAC2`/`0x45D2B4`/`0x40FEE1`。**Q2** `mgr=*(u32*)0x4A8D7C` → `res=*(mgr+0x64)` → `count=res+8` → `table=res+0x8C`（项 8B，`+0`=名字 `char*`，`+4`=数据基址，首指令 `+4+0x10`），访问器 `0x40D070`/`0x40D0A0`/`0x40D0B0`/`0x4106D0`，加载器 `FUN_0045D900`（SCPT `0x54504353`，`.ecl` 头布局实测吻合），按名二分 `FUN_0045DB10`，与 th13 逐字段一致（仅 mgr 全局 `0x4C2188→0x4A8D7C`、`res` 偏移 `0xAC→0x64`）。**Q3** 显式栈存在（基址 `T+8`、SP `T+0x1008`、`ret` 固定回退 8B、压帧 `FUN_0045B610`），⚠️ 帧/实参布局与遍历步长未完全定案。**Q4** 宿主工厂 `FUN_004108F0` 返回 `EAX`=H，站点 `0x4204A3`/`0x4205E0`（`"main"`@`0x494258`），宿主 vtable `0x494074`、`H+0x102C=res`（`0x4113BB`）、`H+0x1030`=线程链头、`H+4`=当前线程（复位 `FUN_0040FED0`）、静态兜底 `*(u32*)(*(u32*)(mgr+0x68))`（节点 `H+0x11A4`）。**Q5** 解释器 `FUN_0045B860`（`EAX`=T）、分发头 `0x45B890`、跳表 `0x45D2C8`/映射 `0x45D3BC`（阈值 `0x58`）、驱动器 `FUN_0045D420`；既有 hook `0x45D2A3`（2B `D9 1F`，`Edi`=线程T）位于「时间未到→累加」尾部。**Q6** 运行期保留名字（需地址区间反查）。**Q7** `0x4A8ECC+0x38/+0x3C`（机体/子机，thprac 既有，🟡）、难度 `0x4A5720`。**Q8** `ECLJump` 只写 `goto`(`0x0C`)（case `0x45BAC2`，只改 `T+0`/`T+4`）；⚠️ 分支关（st4 的 6 份 `stage4c0*`）天然兼容，记入验证清单。**Q9** 路过式 checkpoint（latch）——经过白名单函数即置值、不在表内 no-op（不回退 `main`）；每 checkpoint 登记 1 个入口 sub（含 async）；⚠️ 本作 `async` 落点需注意线程选择（推荐读 `H+0x1030`）。**订正 requests §1 / 总括 §5.1**：`0x45d2a3` 非分发头；`[Edi+0x1014]` = 宿主 H 自身（不是"某个管理器"）、`+0x103c+0x1580` = `H+0x25BC` 宿主 flags；数据区链旧值 `GetMemAddr(0x4a8d7c,0x64,0xC)` **正确可直接用**；th11「sub 名/索引线索」由 ❌ 更正为 ✅。证据：`capstone` 只读反汇编（自写 `D:\workshop\reasm\th11\dl.py`）+ 全程序字节/交叉引用扫描 + `../exes/ecl/th11/*.ecl` 离线实体对账（`stage01.ecl` 的 `main`/`MainSubNN`/`@…async` 与 `stage4c0*` 分支脚本）。**未真机三态；段落入口白名单待枚举。** |
 | 2026-10-17 | **段落入口白名单枚举收口**：§10.4「待枚举」→「**已枚举完毕**」（CSV 第 1 列 **125/125**：章节 37/37、boss 88/88），指向新建 `docs/th11/th11_checkpoint_entry_report.md`；注明**不采用**「`T+4` 换算成偏移」的替代方案（每段落点都落在 `call`/`async call` 或 `enmCreate` 上 ⇒ 直接用 **sub 名**）。顺带订正：头部与 §0 Q9 行的「枚举待做 / 尚未枚举」改为已收口；§2.4 与 §10 的 `stage01.decl:2254` 引文行号订正为 **`:2260`**（`@MainSub00() async;`）与 **`:2272`**（`@MainSub06();`）。**🟡 未真机。** |
+| 2026-10-18 | **新增 §5A「boss 宿主可达性（Q-A / Q-B / Q-C）」**（插在 §5 Q4 之后；用 `§5A` 编号以免重排后续章节的既有交叉引用）。**Q-A**：`mgr+0x68` 宿主链是**全局全宿主链（含 boss）** —— 插链写在工厂 `FUN_004108F0` 体内（`0x410AC1`–`0x410B0E`，**尾插**）、宿主构造 `FUN_004111C0` 的**唯一**调用点就是 `0x410915`（无旁路）⇒ boss 宿主也在链内，**遍历 `node=*(u32*)(node+4)` 即达，不需要新捕获点**；并给出「全宿主表」旁证（复位 `0x40D136` 逐宿主析构、寻敌 `0x412990` / 最近宿主 `0x417E75` 遍历、摘链 `0x410B60`、清链 `0x41F8B8`@`0x41FCD8`）。**Q-B**：工厂 **7** 个调用点全表（VA/RVA + 下一指令 EHOOK 点 + 名字来源）；boss/中boss 主创建点 = **`0x413044` / `0x4131D2` / `0x4132C0`**（`enmCreate*` 族，名字 = `ins+0x14`，均由 `0x412E30` 的 `>0x58` 委派处理器分派），另 `0x40D878`（`table[idx]`）与 `0x418508`（`"MBossCard2_at2"`）。**Q-C**：所有宿主构造时**无条件**写 `H+0x102C = *(mgr+0x64)`（`0x4113BB`）⇒ **只有一份 res**（`res` 为独立对象、vtable `0x49404C`、其 slot 0 = SCPT 加载器 `0x45D900`）；stage 文件 `ecli` 头列出的 `stageNNboss/mboss.ecl`、`stage4c0*{a,b,c}.ecl` 经 `FUN_00410D50` 按名逐条触发加载、由 `FUN_0045D900` 并入**同一张** `res+0x8C`（thprac `SetFile(2..7)` 可用即证）⇒ **boss sub 全在表内**。**裁定**：`logger_progress.md` §4 第 11 条所述「boss 宿主/线程链锚点缺失」**不成立**；实现改为「**宿主链 × 线程链**」双重遍历即可（§5A.4 给出读取链）。§0 速览同步新增 Q-A/Q-B/Q-C 三行。**🟡 静态定案、未真机。** |

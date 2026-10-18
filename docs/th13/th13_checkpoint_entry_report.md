@@ -269,7 +269,12 @@ off   = ip - base                               // 相对文件缓冲的字节�
 7. 🟡 **`ST4 前半 #1` 的 `!HL` 门控**：`MainSub00h` 只在 **Hard/Lunatic** 派生（`st04.decl` `MainFront` 首行 `$I0 = 1; !HL @MainSub00h() async;`）⇒ Easy/Normal 下该行**永不命中**；须真机在 E/N 下确认（可能需把该行改判给 `MainSub00` 或容忍）。
 8. 🟡 **`goto` opcode（§2.3）**：离线解析须认 `0x0C/0x0D/0x0E` 三个 opcode；`ECLJump` 写入的 `ins[0x0A] = 0xFF`（任意难度）在 E/N/H/L 下均生效（否则 `goto` 会被 `test byte [T+0x101C], cl` 跳过 —— 报告 §13 点名的最需真机确认项）。
 9. 🟡 **采样时机**：确认 `Update()` 相对 ECL VM 的执行顺序（帧内 `goto`/`call` 是否一定在采样前执行完）—— 决定「精确匹配」是否够用；`goto` 之后、目标 `call` 之前的那一瞬 `T+4` 仍指向旧 sub 内（报告 §9.2 第 4 条）。
-10. 🟡 **boss 行（方案二）**：本表 boss 行**入口名已枚举**，但 th13 的 **boss 宿主 / 槽表 / 门控位尚无逆向锚点**（`logger_progress.md` §4）⇒ boss 行匹配待补逆向；且本作读的是**指令地址**（非 subIdx），boss 侧同样需「地址 → 名字」区间反查。
+10. ✅ **boss 行（方案二）—— 缺口已消解（2026-10-18，静态）**：本表 boss 行**入口名已枚举**；原先记的「th13 **boss 宿主 / 槽表 / 门控位尚无逆向锚点**」**已由 `docs/th13/th13_ecl_re_report.md` §5.4（Q-A/Q-B/Q-C）定案**：
+    - **Q-A**：宿主链 `mgr+0xB0` 是**全局全宿主链**（含 boss）—— 全程序唯一宿主分配点 `FUN_004183F0`（`push 0x52E4` 仅 `0x4183FC`）**无条件**入链 ⇒ **遍历这条链即可拿到 boss 宿主，无需新增捕获点**。
+    - **Q-B**：boss / 中boss 宿主由 ECL **`enmCreateA`（opcode `0x12D`）** 另起（`0x41B2EC` → `FUN_0041FCC0` → `call 0x4183F0` @ `0x41FE62`，名字 = 指令 `ins+0x14`）；备选捕获点 **`0x41FE67`/RVA `0x1FE67`**（5B，`EAX` = 新宿主）。
+    - **Q-C**：boss 宿主的 `H+0x11CC` = **同一个全局 `res`**（构造器 `FUN_00418F40` @ `0x4191EB` 无条件写 `*(u32*)(mgr+0xAC)`），其 `res+0x8C` 表**含 `stNNbs`/`stNNmbs` 的全部 sub**（`BossN`/`BossCardN`/`MBoss*`/`MBossCardN`）⇒ **「地址 → 名字」区间反查对 boss 行成立**。
+    - 本节 §3.4 末条「若日后扩到 boss 行须一并登记槽号」**仅对「按偏移匹配」仍成立**（偏移要用 `res+0xC+slot*4` 的文件基址）；**按 sub 名匹配则不需要槽号**（boss sub 与章节 sub 同在 `res+0x8C` 这一张表里）。
+    - 残余 🟡：以上**全部为静态定案**，boss 行仍需真机确认（报告 §13 新增项 / 监控方案 §7 验证 6）。
 11. 🟡 **变体**：Steam / 汉化版的 `stNN.ecl` 是否与原版一致（偏移是**数据偏移**，脚本改版即失效）。
 
 ---
@@ -290,3 +295,4 @@ off   = ip - base                               // 相对文件缓冲的字节�
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-17 | **建档**。汇总 th13 checkpoint 白名单（**116/116**：章节 44/44、boss 72/72）：§1 按关列出全部入口（道中 + boss）并给出命名规律（道中 `MainSubNN`，`NN` 非连续、跳过通用波次 sub；关底 `BossN`/`BossCardN`、中boss `MBossN`/`MBossCardN`；ST7 三个 MID 直接落 `MBossCard1/2/3`）；§2 记录口径与特例（**`ST5 后半 #4` = `MainSub08+0x390` 为全作唯一两级粒度行，偏移基准 = 相对该 sub 首条指令（`MainSub08` 首指令 `0x5140`、落点 `0x54d0`），用户已定案不新增第 5 列**；`ST4 前半 #3`/`ST5 后半 #3` 两处**同名容忍**照实记录；**离线解析工具坑：th13 文件内 `goto` 有 `0x0C`（无条件）/`0x0D`（`unless`）/`0x0E`（`if`）三个 opcode，thprac 注入恒为 `0x0C`，只认 `0x0C` 会失步**）；§3 实现影响（双匹配 sub 名 + ip 偏移、偏移命中优先；指针链 `ip=*(u32*)(T+4)` / `base=*(u32*)(res+0xC+slot*4)` / `off=ip−base`；**订正总括 §5.1「th13 为同步 `call` 进入」——实测 `async call`（`0x0F`→`FUN_004793E0` 另起线程）导致 `ST1 后半 #2`/`ST4 前半 #1`/`ST5 前半 #1` 三行为 async-only，须遍历宿主线程链 `H+0x11D0`→`H+0x11D4`**；基址不可缓存）；§4 风险 / 待真机清单 11 条。**全部 🟡 未真机三态。** |
+| 2026-10-18 | **§4 第 10 条改判：boss 缺口消解（静态）**。原「th13 **boss 宿主 / 槽表 / 门控位尚无逆向锚点** ⇒ boss 行匹配待补逆向」改为 **✅ 已由 `docs/th13/th13_ecl_re_report.md` §5.4（Q-A/Q-B/Q-C）定案**：宿主链 `mgr+0xB0` 为**全局全宿主链**（唯一分配点 `FUN_004183F0` 无条件入链）⇒ 遍历即得 boss 宿主、**无需新增捕获点**；boss / 中boss 宿主由 ECL `enmCreateA`（opcode `0x12D`，`0x41B2EC` → `FUN_0041FCC0` → `call 0x4183F0` @ `0x41FE62`）另起，备选捕获点 `0x41FE67`/`0x1FE67`；boss 宿主 `H+0x11CC` = 同一个全局 `res`（构造器 `FUN_00418F40` @ `0x4191EB`），其 `res+0x8C` 表含 `stNNbs`/`stNNmbs` 全部 sub ⇒ 「地址 → 名字」反查对 boss 行成立。同时补注：§3.4 末条「扩到 boss 行须登记槽号」**仅对按偏移匹配仍成立**，按 sub 名匹配不需要槽号。**仍为静态定案，boss 行待真机。** |

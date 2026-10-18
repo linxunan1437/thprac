@@ -1,6 +1,6 @@
 # TH10 checkpoint「用 ip 偏移量代替 sub 名」可行性（逐作）
 
-> 上位文档：`docs/logger/logger_re_disasm_overview.md`（总括，**§1.2 口径 / §6 Q9 / §9.9 未定论**）、`docs/th10/th10_ecl_re_report.md`（th10 逆向报告，**§2.3 地址区间反查 / §3.5 `GetMemAddr` 展开 / §10.4 / §10.5**）、`docs/logger/checkpoint_entry_backfill_workflow.md`（回填口径）、`docs/logger/logger_progress.md`（§4 第 10 条）。
+> 上位文档：`docs/logger/logger_re_disasm_overview.md`（总括，**§1.2 口径 / §6 Q9 / §9.9 未定论**）、`docs/th10/th10_ecl_re_report.md`（th10 逆向报告，**§2.3 地址区间反查 / §3.5 `GetMemAddr` 展开 / §5A boss 宿主可达性 / §10.4 / §10.5**）、`docs/logger/checkpoint_entry_backfill_workflow.md`（回填口径）、`docs/logger/logger_progress.md`（§4 第 10 条）。
 > 需求来源：用户提议（2026-10-17）——「th10 直接查 ip 偏移，把 checkpoint 记作 ip 偏移量」。
 > 触发原因：`docs/logger/th10_checkpoints.csv` 第 1 列 91/109 已填、**18 行留空**（15 行 = st1–st3 的段落入口落在 `main` 内部，sub 名粒度不够；3 行 = `ST4 前半 #2` / `ST5 后半 #1` / `#2` 与同关其它行**同名冲突**）。
 > 二进制：`../exes/th10.exe`，487936 B，`TimeDateStamp = 1186086096`，`ImageBase = 0x400000`，`RELOCS_STRIPPED`（⇒ **RVA = VA − 0x400000**）。
@@ -65,7 +65,7 @@ off   = ip - base                                         // ★ 相对文件缓
 
 - `stage01.decl:2` = `ecli { "default.ecl"; }`（st2–st7 同）⇒ **slot 0 = 该关主文件 `stageNN.ecl`，slot 1 = `default.ecl`**（与 `checkpoint_entry_backfill_workflow.md` §3.1 的槽位约定一致）。
 - `THStageWarp`/`THPatch` 的**章节**跳转全部走默认槽（`SetBaseAddr` 不 `SetFile`）⇒ 本表 18 行 **一律 slot 0**。
-- ⚠️ 若日后把 **boss 行**也改成偏移（boss 脚本在 `stNNbs`/`stNNmbs` 等槽），则必须把 **slot 号**一并登记 —— 本表不含 boss 行，见 §7。
+- ⚠️ 若日后把 **boss 行**也改成偏移，则必须把 **slot 号**一并登记 —— 本表不含 boss 行，见 §7。（**2026-10-18 订正**：本作 **无独立 boss 文件 / boss 槽** —— 7 关 `ecli` 只有 `default.ecl`，boss sub 与 `main` **同在 slot 0 的 `stageNN.ecl`**；见报告 §5A.3。）
 
 ### 1.4 基址固定吗？—— **不固定**（🟡）
 
@@ -197,7 +197,7 @@ off   = ip - base                                         // ★ 相对文件缓
 
 - **成因**：thprac 的章节跳转与 boss 跳转共用同一个「章节闸门」偏移（st1 `0x9cb8`、st4 `0x14a64`），boss 跳转只改 `at_frame`；`t_land ≤ at_frame` 时 ip 会继续跑到下一个等待点，正好是「后半第一节」的锚点。
 - **性质**：这**不是 ip 偏移方案特有的问题**，而是**既有 sub 名口径同源的已知问题** —— `logger_progress.md` §6（2026-10-16）已记录：th16 真机上「很多关卡后半第一节的 checkpoint 实为增援章节，主线程在中boss 存活期间就开跑」，th16 已用「中boss 存活期间章节 checkpoint 只缓存、boss 死亡 sub 出现时补显示」修掉。`ST4 MID1 → MainSub5`（= `ST4 后半 #1` 的 sub 名）在 **sub 名口径下同样会误判**。
-- **对策（复用既有机制，不新增设计）**：th10 移植 th16 的「中boss 窗口」：boss 宿主里出现「中boss 死亡/逃逸 sub」（`MBossDead`/`MBossEscape`/`MBossDead_anim` 等，逐作按 `.decl` 归纳）之前，章节命中只缓存（`mPending`），窗口关闭时补显示。**注意**：th10 的 boss ECL 跑在**boss 自己的宿主**里（报告 §5.3/§5.4），而误判发生在**主线宿主**，故「中boss 存活」这一状态须从 boss 宿主侧采集（与 th16 同构）。
+- **对策（复用既有机制，不新增设计）**：th10 移植 th16 的「中boss 窗口」：boss 宿主里出现「中boss 死亡/逃逸 sub」（`MBossDead`/`MBossEscape`/`MBossDead_anim` 等，逐作按 `.decl` 归纳）之前，章节命中只缓存（`mPending`），窗口关闭时补显示。**注意**：th10 的 boss ECL 跑在**boss 自己的宿主**里（报告 §5.3/§5.4），而误判发生在**主线宿主**；「中boss 存活」**不必从 boss 宿主侧采集** —— 可直接读 `*(u32*)(mgr+0x10)`（thprac 既有 `bossExists`，`thprac_th10.cpp:548`；报告 **§5A.2/§5A.4**，**2026-10-18 订正**）。boss 宿主本身也**已可达**（宿主链表 `mgr+0x58` 是全宿主链，报告 §5A.1），需要时沿 `node+4` 遍历即可。
 - 🟡 未真机：撞点表是**离线按指令时间推算**的，未在真机确认「中boss 存活期间主线程 ip 是否真的停在锚点上」。
 
 ### 5.2 风险 B：p1 锚点会被每次 warp 路过（🟡 低）
@@ -264,7 +264,7 @@ off   = ip - base                                         // ★ 相对文件缓
 
    至此 th10 第 1 列 **109/109**（章节 41/41、boss 68/68）；入口表小结见 `docs/th10/th10_checkpoint_entry_report.md`。
 2. **是否采用区间匹配**（§4.3）：**暂不**。`ST4 前半 #2` 的 1 帧窗口问题**用户已决定无视**（§3.2），本行照**落点**登记。
-3. **boss 行是否也改偏移**：**暂不**（boss 行保持纯 sub 名）。th10–th13 的 boss 侧连逆向锚点都没有（`logger_progress.md` §4 第 11 条），且 boss 脚本在其它槽（须登记槽号）。本章程行方案**不依赖** boss 行落地。
+3. **boss 行是否也改偏移**：**暂不**（boss 行保持纯 sub 名）。**2026-10-18 订正**：原文「th10–th13 的 boss 侧连逆向锚点都没有（`logger_progress.md` §4 第 11 条），且 boss 脚本在其它槽（须登记槽号）」**对本作已不成立** —— th10 的 **boss 宿主已可达**（宿主链表 `mgr+0x58` 是**全宿主链**，含 boss；捕获点 `0x40ED16` 可选），且**无独立 boss 文件 / boss 槽**（boss sub 与 `main` 同在 slot 0 的 `stageNN.ecl`，同属一份全局 `res`）⇒ 「地址 → 名字」反查对 boss 行成立（报告 **§5A**）。「暂不」的**决定不变**（boss 行保持纯 sub 名），只是**理由**由「缺锚点」改为「口径已定案（boss 行用 sub 名即可）」。本章程行方案**不依赖** boss 行落地。
 4. **上位文档回填**（由主代理统一更新，本文不代改）：总括 §1.2 / §9.9 的「粒度待决」可改为「**th10 定案：入口记作 `sub名+0x偏移`（基准 = 相对该 sub 首条指令），18 行见 `docs/th10/th10_checkpoint_ip_offset.md` §3.1**」；`checkpoint_entry_backfill_workflow.md` §3.3 的章节行取值口径补一句「入口可带 `+0x` 后缀」，§6 自检相应放宽；并建议 §3.3 规则 1 改用 §2.3 判据（「最后一条**落点会等待**的 jump」）。
 
 ---
@@ -283,3 +283,4 @@ off   = ip - base                                         // ★ 相对文件缓
 | --- | --- |
 | 2026-10-17 | 建档。回答用户提议「th10 用 ip 偏移量代替 sub 名登记 checkpoint」：**结论可行**。① **Q1** 给出 `ip = *(u32*)(T+4)` → `off = ip − *(u32*)(res + 0xC + slot*4)` 的完整链（`res = *(u32*)(*(u32*)0x477704+0x54)`；章节 warp 固定 slot 0 = `stageNN.ecl`；基址在堆上、**每帧重读不可缓存**），三条独立证据（加载器写侧 `0x45022D` + `SCPT` 校验、thprac `ECLHelper` 读侧 `thprac_games.h:710-726`、warp 常量落点吻合）。② **Q2** 用离线 SCPT 解析把全部 warp 偏移映射回 sub，**逐条复现 CSV 已填的章节行** ⇒ 同坐标系、现成可抄；并顺带给出两条判据：「落点会等待 ⇔ 该 jump 是段落入口」（`t_land > at_frame`）、「`ECLJump` 不移动任何指令地址」。③ **Q3** 给出 18 行偏移表（同关内两两不同 ⇒ **18/18 唯一定位**），标注 3 行 p1 的锚点 = 补丁位（非 `main` 首指令）、**1 行 `ST4 前半 #2` 落点跑穿**（`dest 0xe048` 不可观测，须用 `0xe0c0` 或区间 `[0xe048,0xe918)`）。④ **Q4** 指出 th10 **尚无实现** ⇒ 无迁移成本；最小改动 = CSV 加可选第 5 列 `入口偏移` + th10 logger 加偏移表（偏移命中优先于名字命中）+ 两份通用 workflow 的自检放宽；th14–th18 零影响。⑤ **Q5** 实测 **boss 跳转撞章节锚点 5 处**（`ST1 MID1/MID2_EN/MID2_HL`→`0xafd8`=`ST1 后半 #1`；`ST4 MID1`→`0x14aa4`=`ST4 前半 #1`、`0xf930`=`ST4 后半 #1`），与既有 sub 名口径同源、可复用 th16 的「中boss 窗口只缓存」；`ECLJump`/`goto` **不移动指令地址** ⇒ 偏移恒定；分支关对 th10 不适用。**全部为 🟡 静态定案（未真机三态）**；证据 = 离线 SCPT 解析 + 逐指令解码 + `capstone` 复核等待条件 + 引用 th10 报告。**未改任何 CSV / 源码 / 其它文档。** |
 | 2026-10-17 | **订正 §4 / §7（用户否决「第 5 列」方案，改定案「第 1 列 `sub名+0x偏移`」）**：① §4.2 原「CSV 追加第 5 列 `入口偏移`」**已被用户否决** —— 定案为 **第 1 列统一用 `sub名+0x偏移` 记法**（与 th13 的 `MainSub08+0x390` 同基准），**不新增第 5 列**；实现侧最小改动相应改为「**解析第 1 列时识别 `+0x` 后缀**」而不是「读第 5 列」，并明确偏移基准 = **相对该 sub 首条指令**（= sub 数据基址 `+0x10`）。② §7 原「是否回填待定」→ **18 行已回填**，逐行列出实际写入值（`main+0x28`/`main+0x2b0`/…/`MainSub1+0x154`/`MainSub8+0x14`/`MainSub8+0x444`；= §3.1「落点」− `0x10`），CSV 第 1 列达 **109/109**；区间匹配记为**暂不采用**（1 帧窗口用户决定无视）。③ 连带订正 §0 第 4 行、文档头状态行、§3.1 列义（补「CSV 值 = 落点 − `0x10`」）与 §4.3（`(sub, offset)` 即本作记法）。**🟡 未真机。** |
+| 2026-10-18 | **boss 侧订正（依报告新增 §5A）**：① §5.1 对策末句「「中boss 存活」这一状态须从 **boss 宿主侧**采集」→ 改为「**不必**从 boss 宿主侧采集，可直接读 `*(u32*)(mgr+0x10)`（thprac 既有 `bossExists`）」，并补「boss 宿主本身也已可达（`mgr+0x58` 是全宿主链）」。② §1.3 与 §7.3 的「boss 脚本在 `stNNbs`/`stNNmbs` **等槽**（须登记槽号）」**对本作不成立** —— th10 **无独立 boss 文件 / boss 槽**，boss sub 与 `main` 同在 slot 0 的 `stageNN.ecl`、同属一份全局 `res`（报告 §5A.3）；§7.3 的「暂不」**决定不变**，只订正**理由**（由「缺锚点」改为「口径已定案」）。③ 文档头引用块补 §5A。**未改任何 CSV / 源码 / 其它文档；🟡 未真机。** |
