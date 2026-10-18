@@ -5,7 +5,7 @@
 > 白名单数据：`docs/logger/th14..th18_checkpoints.csv`（本迭代消费其第 4 列「记录名」）
 > 代码：`thprac/src/thprac/thprac_games.{h,cpp}`（共享会话模块，新增 `#pragma region Game Session Log`）、`thprac/src/thprac/thprac_th14/15/16/17/18.cpp`（各作 Logger 接线）
 > 分支 / 提交：`lxn/game-logger`；`feat(logger): 共享一局日志落盘模块`、`beta: logger 日志落盘 th14–th18 接线`
-> 状态：**已接线 + 编译通过（Release|x86）**；**真机未测**（按用户安排，本功能补齐后统一验证）
+> 状态：**已接线 + 编译通过（Release|x86）**；**五作最小冒烟通过**（2026-10-18，仅确认功能可用；**边界项未逐项验证**）
 > 地址口径：本文不新增任何地址。`PLAYER_PTR` / `STAGE_NUM` / 机体地址一律复用各作 `thprac_thXX.cpp` 顶部的 `enum addrs` 或 IGI 面板既有读法。
 
 ---
@@ -14,7 +14,7 @@
 
 | 项 | 结论 |
 | --- | --- |
-| 文件格式 | **JSONL**：一行一局，纯追加，不读回改写 |
+| 文件格式 | **JSONL**：一行一局，纯追加，不读回改写。**唯一例外**：单章节练习合并会就地改写**最后一行**（口径 11）——仍不读回文件、不跨进程 |
 | 文件位置 | `<数据目录>logger_sessions_YYYYMM.jsonl`（每月一个，五作共享，靠 `game` 字段区分） |
 | 一局边界 | **`*_game_start`（开新局，含重开）** + **`PLAYER_PTR` 由非 0 变 0（一局结束）** |
 | 结束判据来源 | **直接复用各作 IGI 面板的显隐判据**（`thprac_th16.cpp:922-936` 的 `OnPreUpdate` 用的就是 `GetMemContent(PLAYER_PTR)`），不新增任何逆向 |
@@ -22,6 +22,7 @@
 | checkpoint 字段 | 只有「启动」与「结束」两个（需求 §5 的「最后checkpoint」与「结束checkpoint」合并，用户 2026-10-17 定案） |
 | 强退进程 | 主动放弃记录，不处理（用户 2026-10-17 定案） |
 | 落盘位置 | `GameSession::Tick()` 里，**一局至多一次** |
+| 单章节合并 | 同起始 checkpoint 的连续单章节练习局**并入同一行**，就地更新 `total`/`got`（口径 11）。判定只用共享字段，**五作都生效、默认开启** |
 | 代码量 | 共享模块 2 文件（新增 region，不加新文件）；五作各 8 处调用，逐字同构；**th17 另有第 9 处**（`break` / 撞咆哮，非逐字同构） |
 | 工程文件 | **不需要**改 `thprac.vcxproj` / `.filters`（无新文件） |
 
@@ -31,7 +32,7 @@
 
 | 层 | 文件 | 职责 | 知道什么 |
 | --- | --- | --- | --- |
-| 共享容器 + 序列化 + 写盘 | `thprac_games.h`（`#pragma region Game Session Log`，插在 `#pragma region Json` 的 endregion 之后）、`thprac_games.cpp`（同 region，插在 `#pragma region Virtual File System` 之前） | `GameLogEventType` / `GameLogEvent` / `GameSessionData` / `GameSession` / `GameLogRecordOfSection()` / `GameSessionAppendJsonLine()` | 只知道「一局」这个概念，**不知道任何游戏、地址、checkpoint 语义** |
+| 共享容器 + 序列化 + 写盘 | `thprac_games.h`（`#pragma region Game Session Log`，插在 `#pragma region Json` 的 endregion 之后）、`thprac_games.cpp`（同 region，插在 `#pragma region Virtual File System` 之前） | `GameLogEventType` / `GameLogEvent` / `GameSessionData` / `GameSession` / `GameLogRecordOfSection()` / `GameSessionWriteResult` / `GameSessionAppendJsonLine()` / `GameSessionRewriteJsonLine()` | 只知道「一局」这个概念，**不知道任何游戏、地址、checkpoint 语义** |
 | per-game 拥有者 | `thprac_th14/15/16/17/18.cpp` 里的 `THxxLogger` | 持有 `GameSession mSession;`，在 4 个调用点接线，提供「当前段落」 | 各作的 ECL 采样细节 |
 
 **为什么放在 `thprac_games.*`**：① 既有 JSON 序列化宏（`CreateJson` / `AddJsonValue` / `AddJsonValueEx` / `ReturnJson`，`thprac_games.h:332-446`）就在这个文件里；② `thprac_games.cpp` 已经是「游戏侧共享 + 碰文件」的 TU（`ReplaySaveParam` 在 `:1198` 用 `CreateFileW`/`WriteFile`），且 `LauncherGetDataDir` 的头已在 `:2` include；③ 五个 per-game cpp 首个 include 就是 `thprac_games.h`。
@@ -61,6 +62,14 @@ thprac 的 `EHOOK` 是 **INT3 + VEH 同步回调**，跑在触发指令的游戏
 {"game":"th16","start":"2026-10-17 21:03:44","shot":"ReimuA","startCheckpoint":"ST1 前半 #1","endCheckpoint":"ST3 BOSS1","checkpointCount":11,"events":[{"type":"bomb","checkpoint":"ST1 后半 #2"},{"type":"miss","checkpoint":"ST2 BOSS2"}]}
 ```
 
+单章节练习的合并行（口径 11）——同一段连续重开 5 次、其中 3 次无 miss/bomb：
+
+```json
+{"game":"th16","start":"2026-10-18 14:02:11","shot":"ReimuA","startCheckpoint":"ST3 BOSS2","endCheckpoint":"ST3 BOSS2","checkpointCount":1,"total":5,"got":3,"events":[{"type":"miss","checkpoint":"ST3 BOSS2"}]}
+```
+
+> 合并行的 `events`/`endCheckpoint`/`checkpointCount` 只反映**首条**尝试（口径 11 的必然推论）：上例里后 4 次尝试的 miss 细节不在 `events` 里，但计数在 `total`/`got` 里。
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `game` | string | `th14`…`th18`。月度文件五作共享，靠它区分 |
@@ -69,10 +78,12 @@ thprac 的 `EHOOK` 是 **INT3 + VEH 同步回调**，跑在触发指令的游戏
 | `startCheckpoint` | string | 本局**首次** latch 到的记录名；一次都没 latch 则 `"main"` |
 | `endCheckpoint` | string | 本局**最后一次** latch 到的记录名；同上兜底 `"main"` |
 | `checkpointCount` | int | latch 次数（含启动 checkpoint，即首次 latch 记 1）。等价读法：`checkpointCount - 1` = 启动之后又经过了几段 |
+| `total` | int | **仅在「单章节」行出现**（`total > 0`）；本行合并进来的尝试次数（口径 11） |
+| `got` | int | 与 `total` **成对出现**（判据挂在 `total` 上，`got` 不单独判零）；其中无 miss/bomb 的次数 |
 | `events` | array | `{type, checkpoint}`；`type ∈ {"miss","bomb","break"}`（**`break` 仅 th17 产出**，= 撞咆哮）；`checkpoint` = 事件发生时 IGI 面板显示的段落（未 latch 前为 `"main"`） |
 | `eventsDropped` | int | **仅在 >0 时出现**；`events` 溢出 256 后被丢弃的条数 |
 
-固定字段顺序（writer 决定）：`game, start, shot, startCheckpoint, endCheckpoint, checkpointCount, events[, eventsDropped]`。读取端按 key 取值，不依赖顺序（吸取 `ParseGameSessionLine` 里 `durationNs` 用 `strstr` 定位的教训，`thprac_launcher_others.cpp:171-173`）。
+固定字段顺序（writer 决定）：`game, start, shot, startCheckpoint, endCheckpoint, checkpointCount[, total, got], events[, eventsDropped]`。读取端按 key 取值，不依赖顺序（吸取 `ParseGameSessionLine` 里 `durationNs` 用 `strstr` 定位的教训，`thprac_launcher_others.cpp:171-173`）。
 
 **序列化用 rapidjson 宏而不是 `_snprintf_s` 手拼**：`AppendGameSessionLine` 用的是 256 字节栈缓冲，字段一长就静默截断；本方案走 rapidjson + `std::string`，天然无截断，也免费拿到转义正确性。注意 `AddJsonValue*` 宏用**变量名**当 key（既有写法，见 `thprac_th16.cpp:399-400`），所以函数里的局部变量名必须与字段名一致；字符串值必须带 `jalloc` 第三参（`AddJsonValueEx(game, gameId, jalloc)`），否则会走到只接受字面量的重载而编译失败。
 
@@ -81,13 +92,14 @@ thprac 的 `EHOOK` 是 **INT3 + VEH 同步回调**，跑在触发指令的游戏
 ## 3. 写盘路径
 
 ```cpp
-void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
+GameSessionWriteResult GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 {
+    GameSessionWriteResult result;
     auto dir = LauncherGetDataDir();          // 带尾 '\'；空串 ⇒ 不可用
-    if (dir.empty()) return;
+    if (dir.empty()) return result;
 
     auto line = GameSessionBuildJsonLine(gameId, data);
-    if (line.empty()) return;
+    if (line.empty()) return result;
 
     SYSTEMTIME now {};
     GetLocalTime(&now);
@@ -96,22 +108,60 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 
     auto hFile = CreateFileW((dir + suffix).c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
         OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE) return;
+    if (hFile == INVALID_HANDLE_VALUE) return result;
     defer(CloseHandle(hFile));
+
+    // FILE_APPEND_DATA 恒定写到 EOF ⇒ 写入前的文件长度就是本行行首偏移（口径 11 要用）。
+    LARGE_INTEGER size {};
+    if (!GetFileSizeEx(hFile, &size)) return result;
+    result.offset = (uint64_t)size.QuadPart;
 
     SetFilePointer(hFile, 0, nullptr, FILE_END);
     DWORD written = 0;
-    WriteFile(hFile, line.c_str(), (DWORD)line.size(), &written, nullptr);
-    WriteFile(hFile, "\n", 1, &written, nullptr);
+    if (!WriteFile(hFile, line.c_str(), (DWORD)line.size(), &written, nullptr) || written != (DWORD)line.size())
+        return result;
+    if (!WriteFile(hFile, "\n", 1, &written, nullptr) || written != 1)
+        return result;
+
+    result.status = GameSessionWriteResult::Status::Ok;
+    result.length = (uint32_t)line.size() + 1; // 含 '\n'
+    return result;
 }
 ```
+
+### 3.1 就地改写（口径 11 的唯一例外）
+
+`GameSessionRewriteJsonLine(offset, length, gameId, data)` 只在**单章节练习合并**时调用，把「仍是文件最后一行」的那一段原地重写：
+
+```cpp
+auto hFile = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+if (hFile == INVALID_HANDLE_VALUE) return GuardFailed;   // 没动过文件
+if (GetFileSizeEx(hFile, &size) != TRUE || size.QuadPart != (LONGLONG)(offset + length))
+    return GuardFailed;                                  // 一字节都不写
+SetFilePointerEx(hFile, offset, ...);
+WriteFile(hFile, line...);  WriteFile(hFile, "\n"...);
+SetFilePointerEx(hFile, offset + line.size() + 1, ...);
+SetEndOfFile(hFile);                                     // 新行更短时截断；更长时是空操作
+```
+
+- **句柄权限必须是 `GENERIC_READ | GENERIC_WRITE`**：`FILE_APPEND_DATA` 的句柄只能写到 EOF，`SetFilePointer` 到中间再写会失败、`SetEndOfFile` 也会 `ACCESS_DENIED`。share mode 与 `SetEndOfFile` 无关。
+- **`size == offset + length` 是硬守卫**：并发追加、跨月换文件（月份后缀在改写时刻**重算**）、文件被删/被截断都会让它失败。
+- **失败分两类，退化动作不同**（写反了要么丢计数要么重复计数）：
+
+  | 失败点 | 状态 | 文件状态 | 调用方动作 |
+  | --- | --- | --- | --- |
+  | 目录空 / 行为空 / 打不开 / size 守卫不匹配 | `GuardFailed` | **一字节未动** | 追加**全新**行（`total = 1`），基线改锚 |
+  | `SetFilePointerEx` / `WriteFile` / `SetEndOfFile` 失败 | `IoFailed` | 旧行可能已部分覆盖 | 追加**合并后**的行（`total = prev + 1`），把计数补回来 |
+
+- **追加句柄未授予 `FILE_SHARE_WRITE`**，任一进程持有写句柄期间另一进程请求写访问会 `CreateFileW` 失败 ⇒ 句柄本身充当 OS 级互斥，无需额外加锁。
 
 - **写盘骨架照搬** `thprac_launcher_others.cpp:132` 的 `AppendGameSessionLine()`（`FILE_APPEND_DATA` + `OPEN_ALWAYS` + `SetFilePointer(FILE_END)`），不跟着抄它「256 字节栈缓冲」那处隐含截断缺陷。
 - **文件名**：`logger_sessions_YYYYMM.jsonl`，与兄弟文件 `gametime_sessions.jsonl` 同族。**五作共享一个文件**，因为需求 §4 说「每一个月一个文件」（单数），且与 gametime 的既有形态一致；要按作分文件只需把前缀换成 `gameId`，一行改动。
 - **月份 key** 取**写盘时刻**的 `wYear`/`wMonth`。跨月边界（10-31 开始、11-01 结束）会落进 11 月文件，而 `start` 仍记 10-31 —— 可接受，登记于此。
 - **行终止符** `\n`（JSONL 规范）。兄弟文件用 `\r\n`，两者都能被逐行解析。
 - **目录不存在**：`%APPDATA%\thprac\` 或 exe 同级 `.thprac_data\` 由 launcher 侧 `LauncherCfgInit(true)`（`main.cpp:169`）创建，注入进程里必然已存在；**不做 `CreateDirectoryW`**（保持「静默失败」的简单语义）。
-- **失败全静默**：目录空 / `CreateFileW` 失败 / `WriteFile` 失败一律 `return`，不弹窗、不打日志、不重试。统计功能绝不能干扰游玩。
+- **失败全静默**：目录空 / `CreateFileW` 失败 / `WriteFile` 失败一律 `return`，不弹窗、不打日志、不重试。统计功能绝不能干扰游玩。改写路径的退化见 §3.1。
 - `LauncherGetDataDir()` 在注入进程里可用：thprac.exe 是被 `LoadLibraryW` 加载进游戏进程的（`thprac_load_exe.cpp:175-184`），`__ImageBase` 仍指向 thprac 模块，`GetModuleFileNameW(&__ImageBase)` 得到 thprac.exe 所在目录。
 
 ---
@@ -170,7 +220,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | **后续 latch（记录名变化）** | `endCheckpoint = record`，`++checkpointCount`（同一记录名重复命中不算，用 `strcmp` 比对以容忍 CSV 同名行） | 零 |
 | **miss / bomb / break** → `PushEvent(type, mSection)` | `events[eventCount++] = {type, mSection}`；满则 `++droppedEvents` | 零 |
 | **`PLAYER_PTR` 由非 0 变 0** → `Tick(false)` | `mPending = mCur; mHasPending = true; mCur = {}; mOpen = false` | 零 |
-| **落盘** → `Tick()` 末尾 | 若 `mHasPending`：序列化 `mPending` → 追加写月度文件 → 清空 | **堆 + 文件 IO（一局一次）** |
+| **落盘** → `Tick()` 末尾 | 若 `mHasPending`：`Flush(mPending)` → `MergeOrAppend()` —— 单章节且可合并则**就地改写上一行**，否则追加新行 → 清空 | **堆 + 文件 IO（一局一次）** |
 | **强退进程** | 不落盘（主动放弃） | — |
 
 补充约定：
@@ -179,6 +229,23 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 - **机体串只在需要时求值**：`Tick` 的 shot 参数由调用方用 `inGame && mSession.NeedsStartInfo()` 守卫，未进入游戏时不读机体地址（菜单里玩家对象不存在，直接读会越界）。
 - **`Flush` 跳过没进过游戏的一局**：`if (!data.hasStart) return;`（例如 `game_start` 后立刻回菜单）。
 - **`Latch` 只在 `mOpen` 且 `record != nullptr` 时生效**：`GameLogRecordOfSection()` 把 `"main"` 归一成 `nullptr`，所以「回到 main」不会污染 checkpoint 计数。
+
+### 5.1 单章节合并基线的状态迁移（口径 11）
+
+`mMergeBase`（`GameSession` 私有成员）= 上一次写入的那一行。**纯内存态，进程重启即失效**（口径 11）；`data` 保留**首条**记录的全部字段（就地改写时只覆盖 `total`/`got`）。
+
+| 触发 | 动作 |
+| --- | --- |
+| 写入的是一条**非单章节**记录 | 追加后 `valid = false`（基线作废） |
+| 写入的是单章节记录，但基线无效 / 起始 checkpoint 不同 / 不同日 / 跨月 | 追加**新行**（`total = 1`、`got = (无 event ? 1 : 0)`），基线**改锚**到该行 |
+| 写入的是单章节记录，且基线有效 + 同月 + 同日 + 同起始 checkpoint | **就地改写**上一行：`total = prev + 1`、`got = prev + (无 event ? 1 : 0)`；其余字段不动。基线只更新 `total`/`got`/`length` |
+| 改写返回 `IoFailed` | 追加**合并后**的行，基线改锚到该行；追加也失败则 `valid = false` |
+| 追加本身失败（目录空 / 打不开） | `valid = false`，绝不留下脏 `offset` |
+| 进程重启 | 天然失效（成员在 `GameSession` 里，随进程消失） |
+
+**`Begin()` 不重置基线**：每次重开都会走 `Begin()`，在那里重置等于禁用合并。
+
+判定助手（`thprac_games.cpp` 的匿名命名空间，只看共享字段、与具体游戏无关）：`GameSessionIsSingleChapter()`、`GameSessionSameDay()`（只比 y/m/d）、`GameSessionSameStartCheckpoint()`（nullptr 归一成 `"main"` 后 `strcmp`）、`GameSessionMonthKey()`（`年*12+月`）。
 
 ---
 
@@ -191,7 +258,9 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 
 ---
 
-## 7. 真机验证清单（未做）
+## 7. 真机验证清单（**仅最小冒烟通过**）
+
+> 2026-10-18：th14–th18 五作各做了一次**最小冒烟**（练习启动 → 确认功能可用），结论是功能可用。**下列各项边界未逐项验证**，因此 8–11 条（单章节合并相关）仍按**未逐项验证**处理，不写成已通过。
 
 1. th16 练习启动一局 → 打几段 → 退出一局回菜单：`<数据目录>logger_sessions_YYYYMM.jsonl` 出现一行，字段与 IGI 面板对得上（`startCheckpoint` = 起始段落，`endCheckpoint` = 退出时段落，`events` 与 miss/bomb 计数一致）。
 2. 重开一局：上一局已落盘、新局开始（文件里多一行）。
@@ -200,6 +269,10 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 5. th14 / th15 / th17 / th18 各跑一次最小流程（启动 → 打一段 → 退出）：五作行都写进同一文件、`game` 字段正确。
 6. 对照 IGI 面板的 miss/bomb 计数与 `events` 条数（**重点 th18 的 cylinder**）。
 7. **th17 的 `break`（撞咆哮）**：练习启动一局 → 触发 ≥2 次撞咆哮 + ≥1 miss + ≥1 bomb → 回菜单：`"type":"break"` 条数 == IGI 面板「撞咆哮」计数（`THPRAC_INGAMEINFO_17_ROAR_BREAK_COUNT`）；每条 break 的 `checkpoint` 与触发时刻 IGI「当前段落」一致（允许 §8 #4 的一帧延迟）。顺带确认该局无 `eventsDropped`（撞咆哮与 miss/bomb 共用 256 上限，见 `knownBugs.md` #3）。
+8. **单章节合并（口径 11）**：练习 warp 到单个 section，连续重开 5 次（其中 3 次无 miss/bomb）→ 月度文件里**只有 1 行**，`total == 5`、`got == 3`，且这 5 次之间**没有被追加新行**。
+9. **合并的边界**：接上一条，换一个 section 再练 → **新起一行**；打一次全关（非单章节）→ 追加新行且**不带** `total`/`got`；把系统日期改到次日再练同一 section → 新起一行。
+10. **就地改写不破坏文件**：验证期间用 `tail` 确认文件**没有残留半行**（旧行更长时被 `SetEndOfFile` 截断干净），且此前已写入的行**一个字节都没变**。
+11. **五作同构**：th14/15/17/18 各做一次单章节练习（连续重开 ≥3 次），确认四作**同样合并**（各留 1 行、`total` 递增）——判定只看共享字段，与具体游戏无关。
 
 ---
 
@@ -214,6 +287,10 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | 5 | `events` 上限 256 | 长局 + 关闭 FastRetry 反复 miss 时可超 | 溢出输出 `eventsDropped`；见 `knownBugs.md` #4（P2） |
 | 6 | th18 的 `shot` 为空 | 其 IGI 无 `diff_pl` 行，机体地址未登记（总括 §6 Q7 只填了 th14） | 需补逆向；不影响其余字段 |
 | 7 | 跨月边界 | 开始与结束跨月时整局落进结束月文件，`start` 仍记开始日 | 可接受，见 §3 |
+| 8 | 合并行的 `events`/`endCheckpoint`/`checkpointCount` 只反映**首条**尝试 | 口径 11 的必然推论：首条无事件、第二条 miss 时，合并行是 `total=2, got=1, events=[]` —— 计数在，细节不在 | 定案，不修；已在 §2 与 `req_logger.md` 口径 11 写明 |
+| 9 | 改写 `IoFailed` 时的撕裂行 | `SetFilePointerEx`/`WriteFile`/`SetEndOfFile` 失败时旧行可能被部分覆盖，随后追加会产出坏行 | 只在磁盘满 / IO 错误时出现；「统计绝不干扰游玩」优先，静默接受。见 `knownBugs.md` #6 |
+| 10 | 并发写者 | 另一游戏进程在同一文件上追加会让 `size != offset + length` | 优雅降级为追加新行（`GuardFailed`）；追加句柄未授予 `FILE_SHARE_WRITE`，句柄本身即 OS 级互斥 |
+| 11 | 合并基线不跨进程 | 关掉游戏重新启动后，同日同 section 再练会另起一行（口径 11：不读回文件最后一行） | 定案，不修。见 `knownBugs.md` #7 |
 
 ---
 
@@ -221,7 +298,7 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 
 - **th18 的机体类型**：无现成来源，需新增逆向，不在范围。
 - **强退进程的落盘**：用户定案「视为主动放弃记录」。
-- **日志文件读回**：本迭代只写不读。
+- **日志文件读回**：本迭代只写不读（单章节合并的就地改写是「改自己刚写的那一行」，不涉及解析既有行，也不跨进程）。
 - **th10–th13 / th06–th08**：监控模块尚未落地（th10–th13 白名单未枚举、th06–08 逆向未跑），无从接线。
 - **`th16_release` / th18 的 deadbomb**：都不是 bomb 语义（th18 的 deadbomb 已在 IGI 里单独显示在 miss 行），不纳入 `events`。
 
@@ -233,3 +310,4 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 | --- | --- |
 | 2026-10-17 | 建档。共享模块 `thprac_games.{h,cpp}`（`#pragma region Game Session Log`）+ th14/15/16/17/18 各 8 处接线。口径：JSONL 一行一局、月度文件、一局边界 = `*_game_start` + `PLAYER_PTR` 下降沿、启动 checkpoint = 首次 latch、字段合并为「启动/结束」两个。**Release\|x86 编译通过；真机未测。** |
 | 2026-10-17 | **th17 新增 `break` 事件（撞咆哮）**：共享枚举 `GameLogEventType` 增 `Break`（`thprac_games.h`）；序列化由二元三元表达式改为 `GameLogEventTypeName()`（同文件内联；原三元表达式对任何非 `Miss` 值都输出 `"bomb"`，新增枚举值会**静默错标**，改 `switch` 后漏写 case 落到兜底输出显眼的 `"?"`——注意 MSVC 的 C4062 只在 `/Wall` 下报、本工程 `/W4` 不报，**编译器拦不住**，已实测确认；`thprac_games.cpp` 调用点局部变量仍名 `type` 以保 JSON key 不变）；`TH17Logger::OnBreak()` + `th17_roar_break`（`0x40F880`）**既有 lambda 体内**一行 `OnBreak()`（**同址不新增 EHOOK**，`instr_size` 不变）。th14/15/16/18 不受影响（`Miss`/`Bomb` 的输出逐字节不变）。**Release\|x86 编译通过；真机未测。** |
+| 2026-10-18 | **单章节练习合并落盘（口径 11）**：`GameSessionData` 增 `total`/`got`（`total == 0` 时整对从 JSON 省略）；`GameSession` 增私有 `MergeBase` 与 `MergeOrAppend()`，`Flush()` 改走它；`GameSessionAppendJsonLine()` 改回传 `GameSessionWriteResult`（含行偏移/长度），新增 `GameSessionRewriteJsonLine()`（`GENERIC_READ\|GENERIC_WRITE` + `size == offset+length` 守卫 + `SetEndOfFile`，`GuardFailed`/`IoFailed` 二分退化）。**合并逻辑全在共享层、默认开启，th14/15/16/17/18 五个 `.cpp` 零改动**（判定只用 `checkpointCount`/`eventCount`/起始 checkpoint/日期，与具体游戏无关）。非单章节记录的输出**逐字节不变**。**Release\|x86 编译通过、`thprac_games.cpp` 零警告；五作最小冒烟通过（仅确认功能可用，边界项未逐项验证）。** |

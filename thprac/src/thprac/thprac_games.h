@@ -487,6 +487,11 @@ struct GameSessionData {
     GameLogEvent events[kMaxEvents] {};
     int32_t eventCount = 0;
     int32_t droppedEvents = 0;
+    // 单章节练习合并计数（口径见 docs/req_logger.md §落地口径 11）：
+    // total = 本行合并进来的尝试数，got = 其中无 miss/bomb 的次数。
+    // 仅「单章节」行会置非 0；total == 0 时两个字段整对从 JSON 省略。
+    int32_t total = 0;
+    int32_t got = 0;
 };
 
 // 一局的边界 = *_game_start（开新局，含重开）与 PLAYER_PTR 由非 0 变 0（一局结束）。
@@ -503,6 +508,8 @@ public:
 
 private:
     void Flush(const GameSessionData& data);
+    // 单章节练习合并：同起始 checkpoint 的连续练习局并入同一行（口径 11）。
+    void MergeOrAppend(const GameSessionData& data);
 
     GameSessionData mCur;
     GameSessionData mPending;
@@ -510,6 +517,20 @@ private:
     bool mOpen = false;
     bool mHasPending = false;
     bool mWasInGame = false;
+
+    // 合并基线 = 上一次写入的那一行。纯内存态，进程重启即失效（口径 11）。
+    // data 保留「首条」记录的全部字段（就地改写时只覆盖 total/got）。
+    // 里面的 const char* 只允许指向各作 mEntries 的冻结串或字面量 "main"，永不下垂。
+    struct MergeBase {
+        bool valid = false;
+        uint64_t offset = 0; // 该行行首在文件中的偏移
+        uint32_t length = 0; // 含 '\n' 的行长
+        int32_t total = 0;
+        int32_t got = 0;
+        int32_t monthKey = 0; // 写入该行时的 年*12+月
+        GameSessionData data {};
+    };
+    MergeBase mMergeBase;
 };
 
 // "main" 是唯一的非 checkpoint 哨兵（req §监控功能 3）。
@@ -518,7 +539,22 @@ inline const char* GameLogRecordOfSection(const char* section)
     return (section && std::strcmp(section, "main") != 0) ? section : nullptr;
 }
 
-void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data);
+// 写盘结果。GuardFailed = 一个字节都没动过文件（调用方可安全改成追加）；
+// IoFailed = 文件已打开、可能已写坏（调用方应改用追加兜底，而不是重试改写）。
+struct GameSessionWriteResult {
+    enum class Status : int8_t { Ok, GuardFailed, IoFailed };
+    Status status = Status::IoFailed;
+    uint64_t offset = 0; // 行首在文件中的偏移，仅 Ok 有效
+    uint32_t length = 0; // 含 '\n' 的行长，仅 Ok 有效
+    bool Ok() const { return status == Status::Ok; }
+};
+
+GameSessionWriteResult GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data);
+
+// 就地改写 [offset, offset + length) 这一段，前提是它仍是文件最后一行。
+// 仅单章节练习合并使用；月份后缀在改写时刻重算，跨月自然失败。
+GameSessionWriteResult GameSessionRewriteJsonLine(uint64_t offset, uint32_t length,
+    const char* gameId, const GameSessionData& data);
 
 #pragma endregion
 

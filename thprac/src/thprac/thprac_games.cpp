@@ -1451,6 +1451,36 @@ bool CloneReplayWithParams(const std::wstring& rep_path, const std::string& para
 
 #pragma region Game Session Log
 
+// 单章节练习合并的判定助手（口径 11）。只看 GameSessionData 里的共享字段，与具体游戏无关。
+
+// 「单章节」：练习 warp 到单个 section 时，一局只 latch 一次（且有过事件），
+// 或压根没 latch / 只 latch 一两次（且无事件）。
+static bool GameSessionIsSingleChapter(const GameSessionData& d)
+{
+    return (d.checkpointCount == 1 && d.eventCount > 0)
+        || (d.eventCount == 0 && (d.checkpointCount == 1 || d.checkpointCount == 2));
+}
+
+// 同日：只比记录自带 start 的年月日，不看时刻。
+static bool GameSessionSameDay(const SYSTEMTIME& a, const SYSTEMTIME& b)
+{
+    return a.wYear == b.wYear && a.wMonth == b.wMonth && a.wDay == b.wDay;
+}
+
+// 起始段落相同：nullptr 归一成 "main"，按 strcmp 比（容忍 CSV 同名行不同指针）。
+static bool GameSessionSameStartCheckpoint(const GameSessionData& a, const GameSessionData& b)
+{
+    const char* x = a.startCheckpoint ? a.startCheckpoint : "main";
+    const char* y = b.startCheckpoint ? b.startCheckpoint : "main";
+    return std::strcmp(x, y) == 0;
+}
+
+// 月份 key：跨月即不许改写（改写的月份后缀是重算的，会落到另一个文件）。
+static int32_t GameSessionMonthKey(const SYSTEMTIME& t)
+{
+    return (int32_t)t.wYear * 12 + (int32_t)t.wMonth;
+}
+
 // 一局一行 JSON，追加到 <数据目录>logger_sessions_YYYYMM.jsonl。
 // 写盘骨架照搬 thprac_launcher_others.cpp 的 AppendGameSessionLine（FILE_APPEND_DATA + OPEN_ALWAYS）。
 static std::string GameSessionBuildJsonLine(const char* gameId, const GameSessionData& data)
@@ -1465,6 +1495,8 @@ static std::string GameSessionBuildJsonLine(const char* gameId, const GameSessio
     const char* endCheckpoint = data.endCheckpoint ? data.endCheckpoint : "main";
     int32_t checkpointCount = data.checkpointCount;
     int32_t eventsDropped = data.droppedEvents;
+    int32_t total = data.total;
+    int32_t got = data.got;
 
     CreateJson();
     AddJsonValueEx(game, gameId, jalloc);
@@ -1473,6 +1505,12 @@ static std::string GameSessionBuildJsonLine(const char* gameId, const GameSessio
     AddJsonValueEx(startCheckpoint, startCheckpoint, jalloc);
     AddJsonValueEx(endCheckpoint, endCheckpoint, jalloc);
     AddJsonValue(checkpointCount);
+    // total/got 成对出现：total == 0（非单章节行）时整对省略，与下方 eventsDropped 同一写法。
+    // got 不单独判零，避免出现只有 total 没有 got 的行。
+    if (total) {
+        AddJsonValue(total);
+        AddJsonValue(got);
+    }
     {
         rapidjson::Value events(rapidjson::kArrayType);
         for (int32_t i = 0; i < data.eventCount; ++i) {
@@ -1490,15 +1528,17 @@ static std::string GameSessionBuildJsonLine(const char* gameId, const GameSessio
     ReturnJson();
 }
 
-void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
+GameSessionWriteResult GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
 {
+    GameSessionWriteResult result;
+
     auto dir = LauncherGetDataDir();
     if (dir.empty())
-        return;
+        return result;
 
     auto line = GameSessionBuildJsonLine(gameId, data);
     if (line.empty())
-        return;
+        return result;
 
     SYSTEMTIME now {};
     GetLocalTime(&now);
@@ -1508,13 +1548,88 @@ void GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data)
     auto hFile = CreateFileW((dir + suffix).c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
         OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE)
-        return;
+        return result;
     defer(CloseHandle(hFile));
+
+    // FILE_APPEND_DATA 的写入恒定落在 EOF，所以写入前的文件长度就是本行行首偏移。
+    // 句柄未授予 FILE_SHARE_WRITE，本句柄存活期间别的进程打不开写句柄 ⇒ 无并发追加。
+    LARGE_INTEGER size {};
+    if (!GetFileSizeEx(hFile, &size))
+        return result;
+    result.offset = (uint64_t)size.QuadPart;
 
     SetFilePointer(hFile, 0, nullptr, FILE_END);
     DWORD written = 0;
-    WriteFile(hFile, line.c_str(), (DWORD)line.size(), &written, nullptr);
-    WriteFile(hFile, "\n", 1, &written, nullptr);
+    if (!WriteFile(hFile, line.c_str(), (DWORD)line.size(), &written, nullptr) || written != (DWORD)line.size())
+        return result;
+    if (!WriteFile(hFile, "\n", 1, &written, nullptr) || written != 1)
+        return result;
+
+    result.status = GameSessionWriteResult::Status::Ok;
+    result.length = (uint32_t)line.size() + 1; // 含 '\n'
+    return result;
+}
+
+// 就地改写「仍是文件最后一行」的那一段。
+// 必须用 GENERIC_READ | GENERIC_WRITE 打开：FILE_APPEND_DATA 的句柄只能写到 EOF，
+// SetFilePointer 到任意偏移再 WriteFile 会失败，SetEndOfFile 也要求句柄带 GENERIC_WRITE。
+GameSessionWriteResult GameSessionRewriteJsonLine(uint64_t offset, uint32_t length,
+    const char* gameId, const GameSessionData& data)
+{
+    GameSessionWriteResult result;
+
+    auto dir = LauncherGetDataDir();
+    if (dir.empty())
+        return result;
+
+    auto line = GameSessionBuildJsonLine(gameId, data);
+    if (line.empty())
+        return result;
+
+    SYSTEMTIME now {};
+    GetLocalTime(&now); // 月份后缀在改写时刻重算：跨月 ⇒ 换文件 ⇒ 守卫失败
+    wchar_t suffix[32];
+    swprintf_s(suffix, L"logger_sessions_%04u%02u.jsonl", (unsigned)now.wYear, (unsigned)now.wMonth);
+
+    auto hFile = CreateFileW((dir + suffix).c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        result.status = GameSessionWriteResult::Status::GuardFailed; // 没动过文件
+        return result;
+    }
+    defer(CloseHandle(hFile));
+
+    // 守卫：我们那一行必须仍是文件最后一行。并发追加、跨月换文件、文件被删/被截断
+    // 都会让 size != offset + length，此时一个字节都不写。
+    LARGE_INTEGER size {};
+    if (!GetFileSizeEx(hFile, &size) || size.QuadPart != (LONGLONG)(offset + length)) {
+        result.status = GameSessionWriteResult::Status::GuardFailed;
+        return result;
+    }
+
+    LARGE_INTEGER pos {};
+    pos.QuadPart = (LONGLONG)offset;
+    if (!SetFilePointerEx(hFile, pos, nullptr, FILE_BEGIN))
+        return result; // 以下均为「可能已写坏」
+
+    DWORD written = 0;
+    if (!WriteFile(hFile, line.c_str(), (DWORD)line.size(), &written, nullptr) || written != (DWORD)line.size())
+        return result;
+    if (!WriteFile(hFile, "\n", 1, &written, nullptr) || written != 1)
+        return result;
+
+    // 新行可能比旧行短（total 9→10 会变长，got 位数也会变）：截到新行尾。
+    // 新行更长时本调用是「截到当前大小」的空操作，故无需分支。
+    pos.QuadPart = (LONGLONG)(offset + line.size() + 1);
+    if (!SetFilePointerEx(hFile, pos, nullptr, FILE_BEGIN))
+        return result;
+    if (!SetEndOfFile(hFile))
+        return result;
+
+    result.status = GameSessionWriteResult::Status::Ok;
+    result.offset = offset;
+    result.length = (uint32_t)line.size() + 1;
+    return result;
 }
 
 void GameSession::Begin(const char* gameId)
@@ -1587,7 +1702,76 @@ void GameSession::Flush(const GameSessionData& data)
     // 本局从未进入游戏（例如 game_start 后立刻回菜单），不记。
     if (!data.hasStart)
         return;
-    GameSessionAppendJsonLine(mGameId, data);
+    MergeOrAppend(data);
+}
+
+// 单章节练习合并（口径 11）：与上一行同日、同起始段落时改写上一行，而不是追加。
+void GameSession::MergeOrAppend(const GameSessionData& data)
+{
+    // 1. 非单章节（全关 / 多段练习）：纯追加，基线作废。
+    if (!GameSessionIsSingleChapter(data)) {
+        GameSessionAppendJsonLine(mGameId, data);
+        mMergeBase.valid = false;
+        return;
+    }
+
+    SYSTEMTIME now {};
+    GetLocalTime(&now);
+
+    // 2. 基线有效 且 同月 且 同日 且 同起始段落 ⇒ 尝试就地改写。
+    if (mMergeBase.valid
+        && mMergeBase.monthKey == GameSessionMonthKey(now)
+        && GameSessionSameDay(mMergeBase.data.start, data.start)
+        && GameSessionSameStartCheckpoint(mMergeBase.data, data)) {
+
+        // 合并行 = 首条记录的字段 + 累加后的 total/got。
+        GameSessionData merged = mMergeBase.data; // ~2KB 栈拷贝，无堆
+        merged.total = mMergeBase.total + 1;
+        merged.got = mMergeBase.got + (data.eventCount == 0 ? 1 : 0);
+
+        auto res = GameSessionRewriteJsonLine(mMergeBase.offset, mMergeBase.length, mGameId, merged);
+        if (res.Ok()) {
+            mMergeBase.total = merged.total;
+            mMergeBase.got = merged.got;
+            mMergeBase.length = res.length;
+            return;
+        }
+
+        if (res.status == GameSessionWriteResult::Status::IoFailed) {
+            // 旧行可能已被写坏：追加合并后的行把计数补回来，基线改锚到新追加的这一行。
+            auto appended = GameSessionAppendJsonLine(mGameId, merged);
+            if (appended.Ok()) {
+                mMergeBase.offset = appended.offset;
+                mMergeBase.length = appended.length;
+                mMergeBase.total = merged.total;
+                mMergeBase.got = merged.got;
+                mMergeBase.monthKey = GameSessionMonthKey(now);
+                mMergeBase.data = merged;
+            } else {
+                mMergeBase.valid = false;
+            }
+            return;
+        }
+        // GuardFailed：一个字节都没动，旧行完好 ⇒ 落到下面按「新记录」重新起一行。
+    }
+
+    // 3. 起一行（首次写入 / 起始段落或日期变化 / 守卫失败的退化追加）。
+    GameSessionData first = data;
+    first.total = 1;
+    first.got = (data.eventCount == 0 ? 1 : 0);
+
+    auto res = GameSessionAppendJsonLine(mGameId, first);
+    if (res.Ok()) {
+        mMergeBase.valid = true;
+        mMergeBase.offset = res.offset;
+        mMergeBase.length = res.length;
+        mMergeBase.total = first.total;
+        mMergeBase.got = first.got;
+        mMergeBase.monthKey = GameSessionMonthKey(now);
+        mMergeBase.data = first; // 首条记录快照：改写时其余字段以它为准
+    } else {
+        mMergeBase.valid = false; // 数据目录空 / 打开失败：绝不留下脏 offset
+    }
 }
 
 #pragma endregion
