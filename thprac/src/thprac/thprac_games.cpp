@@ -1451,14 +1451,41 @@ bool CloneReplayWithParams(const std::wstring& rep_path, const std::string& para
 
 #pragma region Game Session Log
 
-// 单章节练习合并的判定助手（口径 11）。只看 GameSessionData 里的共享字段，与具体游戏无关。
+// 单章节练习合并的判定助手（口径 11 / 13）。只看 GameSessionData 里的共享字段，与具体游戏无关。
 
-// 「单章节」：练习 warp 到单个 section 时，一局只 latch 一次（且有过事件），
-// 或压根没 latch / 只 latch 一两次（且无事件）。
+// 「尝试级事件」= miss / bomb / break（玩家在局内的操作结果）。
+// interrupt 只描述本局的**收尾方式**（未通关就退出游戏，口径 12），不算尝试级事件。
+static bool GameSessionHasAttemptEvent(const GameSessionData& d)
+{
+    for (int32_t i = 0; i < d.eventCount; ++i) {
+        if (d.events[i].type != GameLogEventType::Interrupt) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 本局是否含 interrupt（口径 12：未通关就退出游戏）。
+static bool GameSessionHasInterruptEvent(const GameSessionData& d)
+{
+    for (int32_t i = 0; i < d.eventCount; ++i) {
+        if (d.events[i].type == GameLogEventType::Interrupt) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 「单章节」（口径 13，2026-10-18 修订，取代口径 11 的原判据）：
+//   - 只 latch 了 1 段，且含 miss/bomb/break（在首段内就出事）⇒ 单章节；
+//   - 只 latch 了 2 段，且含 interrupt（被打断）⇒ 单章节；
+//   - 只 latch 了 1 段且**只有** interrupt（warp 进去、没 miss 就退到菜单）⇒ 不算。
+// 注意：不含 interrupt 的作品（th14/15/17/18）第二个子句永不成立 ⇒ 它们「干净走完
+// 两段」的练习局不再合并。这是 2026-10-18 定案接受的跨作行为变化（见 req_logger.md 口径 13）。
 static bool GameSessionIsSingleChapter(const GameSessionData& d)
 {
-    return (d.checkpointCount == 1 && d.eventCount > 0)
-        || (d.eventCount == 0 && (d.checkpointCount == 1 || d.checkpointCount == 2));
+    return (d.checkpointCount == 2 && GameSessionHasInterruptEvent(d))
+        || (d.checkpointCount == 1 && GameSessionHasAttemptEvent(d));
 }
 
 // 同日：只比记录自带 start 的年月日，不看时刻。
@@ -1727,7 +1754,14 @@ void GameSession::MergeOrAppend(const GameSessionData& data)
         // 合并行 = 首条记录的字段 + 累加后的 total/got。
         GameSessionData merged = mMergeBase.data; // ~2KB 栈拷贝，无堆
         merged.total = mMergeBase.total + 1;
-        merged.got = mMergeBase.got + (data.eventCount == 0 ? 1 : 0);
+        merged.got = mMergeBase.got + (GameSessionHasAttemptEvent(data) ? 0 : 1);
+        // 口径 14：合并行（total > 1）规范化 —— checkpointCount 固定 1、不记 events。
+        // 合并行的 events 只反映**首条**尝试、不代表整行（口径 11），与其误导不如不记；
+        // checkpointCount 同理（首条是 1 还是 2 对汇总行没有意义）。
+        // 首条（total == 1）**不**规范化：那时 events 就是该次尝试的真实明细。
+        merged.checkpointCount = 1;
+        merged.eventCount = 0;
+        merged.droppedEvents = 0;
 
         auto res = GameSessionRewriteJsonLine(mMergeBase.offset, mMergeBase.length, mGameId, merged);
         if (res.Ok()) {
@@ -1758,7 +1792,7 @@ void GameSession::MergeOrAppend(const GameSessionData& data)
     // 3. 起一行（首次写入 / 起始段落或日期变化 / 守卫失败的退化追加）。
     GameSessionData first = data;
     first.total = 1;
-    first.got = (data.eventCount == 0 ? 1 : 0);
+    first.got = (GameSessionHasAttemptEvent(data) ? 0 : 1);
 
     auto res = GameSessionAppendJsonLine(mGameId, first);
     if (res.Ok()) {

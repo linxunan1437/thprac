@@ -453,7 +453,7 @@ bool CloneReplayWithParams(const std::wstring& rep_path, const std::string& para
 // 热路径（VEH 回调）里只允许调用 Begin / Tick / Latch / PushEvent：它们不碰堆、不做文件 IO。
 // 序列化与写盘全部收在 Flush() 里，一局至多一次。
 
-enum class GameLogEventType : int8_t { Miss, Bomb, Break };
+enum class GameLogEventType : int8_t { Miss, Bomb, Break, Interrupt };
 
 // 事件类型 → JSON 字符串。用 switch 而非二元三元表达式：后者对任何非 Miss 的
 // 值都输出 "bomb"，新增枚举值时会静默错标；switch 漏写 case 则落到末尾兜底，
@@ -467,6 +467,8 @@ inline const char* GameLogEventTypeName(GameLogEventType type)
         return "bomb";
     case GameLogEventType::Break:
         return "break";
+    case GameLogEventType::Interrupt:
+        return "interrupt";
     }
     return "?";
 }
@@ -505,6 +507,12 @@ public:
 
     // 本局还没取到起始信息（时间/机体）——调用方据此决定是否值得去读机体地址。
     bool NeedsStartInfo() const { return mOpen && !mCur.hasStart; }
+
+    // 本帧是「退出游戏」的下降沿（上一帧在局内、本帧 PLAYER_PTR 变 0）——与 Tick 内部的
+    // 一局结束判据（mWasInGame && !inGame）同源。各作在 Tick **之前**调用，据此补记退出类
+    // 事件（如 interrupt）：Tick 会在同一帧把本局快照转待落盘并写盘，之后再 PushEvent 就
+    // 补不进这一局了。
+    bool IsGameExitEdge(bool inGame) const { return mOpen && mWasInGame && !inGame; }
 
 private:
     void Flush(const GameSessionData& data);

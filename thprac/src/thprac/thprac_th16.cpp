@@ -69,6 +69,29 @@ namespace TH16 {
                 || std::strncmp(name, "BossDeadB", 9) == 0;
         }
 
+        // Sub names that end a stage boss fight = the stage is cleared. Names are the
+        // complete `^void Boss*Dead|Boss*Escape` enumeration of
+        // reasm/exes/ecl_dump/th16/*.decl (22 files), matched exactly:
+        //  - BossDead2 (st07bs, Extra) and BossDeadp / BossDeadBp (st05bs, the two
+        //    routes) must be listed: st05bs' own BossDead / BossDeadB are zero-frame
+        //    forwarders (two calls, no wait) that a 60 Hz sample would miss, while
+        //    BossDeadp / BossDeadBp each sit on a `+60` label.
+        //  - BossDeadB must stay out: it ends the stage boss in st05bs, but it also
+        //    ends the *mid-boss* in st07mbs2 (`enmCall($GI0,"MBossDeadp")` +
+        //    `@MBossBDeadp()`), and the name alone cannot tell them apart. Dropping it
+        //    costs nothing - st05bs' route is covered by the 60-frame BossDeadBp.
+        //  - BossCard2_Dead / BossCard8_Dead / BossCard3Et_Dead(Et) are setDeath()
+        //    spell-card end animations that run while the boss is alive; MBoss* is
+        //    excluded by the M prefix. Both are non-matches here.
+        bool IsStageClearSub(const char* name)
+        {
+            return std::strcmp(name, "BossDead") == 0
+                || std::strcmp(name, "BossDead2") == 0
+                || std::strcmp(name, "BossDeadp") == 0
+                || std::strcmp(name, "BossDeadBp") == 0
+                || std::strcmp(name, "BossEscape") == 0;
+        }
+
         // Hard traversal caps; also act as sanity sentinels for corrupted pointers.
         constexpr int32_t kMaxCount = 8192;
         constexpr int kMaxHosts = 1024;
@@ -134,6 +157,10 @@ namespace TH16 {
         bool mMidBossActive = false;
         bool mMidBossDone = false;
         int32_t mBuiltStage = -1;
+        // 本关是否已通关：关底 boss 的死 / 逃收尾 sub（IsStageClearSub）跑过即为真。
+        // 段落入口函数切换 / 换关 / 新局时复位。退出游戏时仍为 false ⇒ 记一条
+        // interrupt 事件（见 Update() 顶部与 docs/req_logger.md 口径 12）。
+        bool mStageClear = false;
         GameSession mSession;
     };
 
@@ -189,6 +216,7 @@ namespace TH16 {
         mPending = nullptr;
         mMidBossActive = false;
         mMidBossDone = false;
+        mStageClear = false;
     }
 
     void TH16Logger::OnMiss()
@@ -207,6 +235,11 @@ namespace TH16 {
     {
         // 一局边界与落盘必须在所有 early return 之前：退出一局后 STAGE_NUM 会落到菜单态。
         bool inGame = GetMemContent<uint32_t>(PLAYER_PTR) != 0;
+        // 未通关就退出游戏（PLAYER_PTR 由非 0 变 0）：记一条 interrupt。
+        // 必须在 Tick **之前** —— Tick 会在同一帧把本局快照转待落盘并写盘。
+        if (!mStageClear && mSession.IsGameExitEdge(inGame)) {
+            mSession.PushEvent(GameLogEventType::Interrupt, mSection);
+        }
         mSession.Tick(inGame, (inGame && mSession.NeedsStartInfo())
                 ? std::format("{}{}", S(IGI_PL_16[*(int32_t*)0x4A57A4]), S(IGI_PL_16S[*(int32_t*)0x4A57AC])).c_str()
                 : nullptr);
@@ -228,6 +261,7 @@ namespace TH16 {
             mPending = nullptr;
             mMidBossActive = false;
             mMidBossDone = false;
+            mStageClear = false;
         }
         if (mStageMap.empty()) {
             return;
@@ -243,6 +277,7 @@ namespace TH16 {
         const char* bossHit = nullptr;
         const char* chapHit = nullptr;
         bool sawMidBossEnd = false;
+        bool sawStageClear = false;
 
         // Nothing is cached across frames: the whole chain is re-walked every tick.
         uintptr_t node = GetMemContent<uintptr_t>(mgr + kMgrHostHeadOff);
@@ -283,6 +318,9 @@ namespace TH16 {
                 if (IsMidBossEndSub(name)) {
                     sawMidBossEnd = true;
                 }
+                if (IsStageClearSub(name)) {
+                    sawStageClear = true;
+                }
                 auto it = mStageMap.find(name);
                 if (it != mStageMap.end()) {
                     // Last hit wins per kind: the host list is tail-inserted, so
@@ -301,6 +339,11 @@ namespace TH16 {
                 }
             }
         }
+
+        // 段落入口函数切换 ⇒ 新的一段开始，本关的「已通关」标记作废。注意不能用
+        // 「任一白名单命中即复位」：boss 战期间 boss 宿主自己就停在白名单 sub
+        // （Boss1 / BossCard2…）上，那样 BossDead 那一帧会被同帧命中当场抹掉。
+        const char* prevSection = mSection;
 
         // A mid-boss fight ends when its death/escape sub runs; whatever chapter
         // checkpoints the main thread crossed meanwhile were reinforcement sections
@@ -334,6 +377,14 @@ namespace TH16 {
             } else {
                 mSection = chapHit;
             }
+        }
+
+        if (mSection != prevSection && std::strcmp(mSection, prevSection) != 0) {
+            mStageClear = false;
+        }
+        // 通关判定放在最后：万一同帧与段落切换撞车，以通关为准。
+        if (sawStageClear) {
+            mStageClear = true;
         }
 
         mSession.Latch(GameLogRecordOfSection(mSection));
