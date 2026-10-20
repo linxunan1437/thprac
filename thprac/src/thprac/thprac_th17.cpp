@@ -110,6 +110,13 @@ namespace TH17 {
         constexpr uintptr_t kResTableOff = 0x8C;
         constexpr uintptr_t kThreadSubOff = 4;
 
+        // Spell-card object (SPELLCARD_PTR) flags. bit0 is the "card active" level:
+        // set only by the spell/spellEx declarer (0x41AD58) and cleared only by
+        // spellEnd() (0x41B181). A 1 -> 0 edge is therefore exactly one card
+        // ending, capture or fail alike. bit1 is the capture bit (unused here).
+        // Do not use +0x1C: that is the card's ANM handle, not the alive bit.
+        constexpr uintptr_t kSpellFlagsOff = 0x78;
+
         // ECL sub naming convention: MainSub* = mid-stage chapter, MBoss* =
         // mid-boss, Boss* = stage boss. Classified by the whitelist key itself.
         constexpr int kKindChapter = 0;
@@ -226,6 +233,8 @@ namespace TH17 {
 
         void LoadCsv();
         void BuildStageMap(int32_t stageNum);
+        // 每帧采样符卡对象，观测「一张符卡结束」（口径 15，零新 hook）。
+        void SampleSpellCard();
 
         std::vector<Entry> mEntries;
         // Keys/values alias mEntries' strings; mEntries is frozen after LoadCsv().
@@ -239,9 +248,19 @@ namespace TH17 {
         bool mMidBossActive = false;
         bool mMidBossDone = false;
         int32_t mBuiltStage = -1;
+        // 符卡结束计数（口径 15）：符卡对象 bit0 的每一帧 1 → 0 下降沿 +1，
+        // mSection 换到新 checkpoint 时 -1（下限 0）。退出时仍 > 0 ⇒ 刚结束的
+        // 符卡还没等到下一个 checkpoint，不记 interrupt。
+        // mSpellObj 用来识别「对象被重建」（换关 / 重试 / 重开）：新对象第一帧
+        // 直接清零，避免把旧对象销毁当成一次符卡结束。
+        int32_t mSpellFlag = 0;
+        uintptr_t mSpellObj = 0;
+        bool mSpellActive = false;
         // 本关是否已通关：关底 boss 的死 / 逃收尾 sub（IsStageClearSub）跑过即为真。
         // 段落入口函数切换 / 换关 / 新局时复位。退出游戏时仍为 false ⇒ 记一条
-        // interrupt 事件（见 Update() 顶部与 docs/req_logger.md 口径 12）。
+        // interrupt 事件（见 Update() 顶部与 docs/req_logger.md 口径 12 / 15）。
+        // 与 mSpellFlag 并列：spellFlag 只覆盖「卡结束但 checkpoint 没跟上」，
+        // 关底收尾的 +60 帧窗口与非符期 escape 仍靠这条兜底。
         bool mStageClear = false;
         GameSession mSession;
     };
@@ -298,6 +317,9 @@ namespace TH17 {
         mPending = nullptr;
         mMidBossActive = false;
         mMidBossDone = false;
+        mSpellFlag = 0;
+        mSpellObj = 0;
+        mSpellActive = false;
         mStageClear = false;
     }
 
@@ -319,13 +341,47 @@ namespace TH17 {
         mSession.PushEvent(GameLogEventType::Break, mSection);
     }
 
+    void TH17Logger::SampleSpellCard()
+    {
+        // No allocation: this runs inside a VEH hook callback.
+        // spell / spellEx share the single spell-card object. Its bit0 stays high
+        // for the whole card and is cleared by spellEnd(), which runs at the first
+        // instruction of the next attack sub, so one sample per frame cannot miss
+        // a card end.
+        uintptr_t obj = GetMemContent<uintptr_t>(SPELLCARD_PTR);
+        if (!obj) {
+            // Menu or stage teardown. Drop the tracking state but keep mSpellFlag:
+            // the exit edge in the same Update() still has to consume it.
+            mSpellObj = 0;
+            mSpellActive = false;
+            return;
+        }
+        bool active = (GetMemContent<uint32_t>(obj + kSpellFlagsOff) & 1) != 0;
+        if (obj != mSpellObj) {
+            // A rebuilt object (new stage / retry / restart) begins a new window; the
+            // teardown of the previous one must not be counted as a card end.
+            mSpellFlag = 0;
+            mSpellObj = obj;
+            mSpellActive = active;
+            return;
+        }
+        if (mSpellActive && !active) {
+            ++mSpellFlag;
+        }
+        mSpellActive = active;
+    }
+
     void TH17Logger::Update()
     {
         // 一局边界与落盘必须在所有 early return 之前：退出一局后 STAGE_NUM 会落到菜单态。
         bool inGame = GetMemContent<uint32_t>(PLAYER_PTR) != 0;
+        // 符卡结束采样必须早于 interrupt 判定：同一帧「清卡 + 退出」也要算进去。
+        SampleSpellCard();
         // 未通关就退出游戏（PLAYER_PTR 由非 0 变 0）：记一条 interrupt。
+        // mSpellFlag > 0 说明有一张卡刚结束、下一个 checkpoint 还没切过来（那是
+        // 已知的 checkpoint 滞后 bug），此时退出不记 interrupt。
         // 必须在 Tick **之前** —— Tick 会在同一帧把本局快照转待落盘并写盘。
-        if (!mStageClear && mSession.IsGameExitEdge(inGame)) {
+        if (mSpellFlag <= 0 && !mStageClear && mSession.IsGameExitEdge(inGame)) {
             mSession.PushEvent(GameLogEventType::Interrupt, mSection);
         }
         mSession.Tick(inGame, (inGame && mSession.NeedsStartInfo())
@@ -353,6 +409,9 @@ namespace TH17 {
             mPending = nullptr;
             mMidBossActive = false;
             mMidBossDone = false;
+            mSpellFlag = 0;
+            mSpellObj = 0;
+            mSpellActive = false;
             mStageClear = false;
         }
         if (mStageMap.empty()) {
@@ -474,6 +533,11 @@ namespace TH17 {
         }
 
         if (mSection != prevSection && std::strcmp(mSection, prevSection) != 0) {
+            // 卡刚结束就换到了新 checkpoint：这一段的「卡结束」已由新段接手，
+            // 计数消费掉（同帧 ++/-- 净 0），避免吞掉之后整关的 interrupt。
+            if (mSpellFlag > 0) {
+                --mSpellFlag;
+            }
             mStageClear = false;
         }
         // 通关判定放在最后：万一同帧与段落切换撞车，以通关为准。
