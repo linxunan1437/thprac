@@ -22,7 +22,7 @@
 | checkpoint 字段 | 只有「启动」与「结束」两个（需求 §5 的「最后checkpoint」与「结束checkpoint」合并，用户 2026-10-17 定案） |
 | 强退进程 | 主动放弃记录，不处理（用户 2026-10-17 定案） |
 | 落盘位置 | `GameSession::Tick()` 里，**一局至多一次** |
-| 单章节合并 | 同起始 checkpoint 的连续单章节练习局**并入同一行**，就地更新 `total`/`got`（口径 11；**「单章节」判据与 `got` 的定义已由口径 13 修订**；**合并行规范化见口径 14**：`checkpointCount` 固定 1、`events` 固定 `[]`）。判定只用共享字段，**五作都生效、默认开启** |
+| 单章节合并 | 同起始 checkpoint 的连续单章节练习局**并入同一行**，就地更新 `total`/`got`（口径 11；**「单章节」判据与 `got` 的定义已由口径 13 修订、子句② 再经口径 16 修订**；**合并行规范化见口径 14**：`checkpointCount` 固定 1、`events` 固定 `[]`）。判定只用共享字段，**五作都生效、默认开启** |
 | 代码量 | 共享模块 2 文件（新增 region，不加新文件）；五作各 8 处调用，逐字同构；**th17 另有第 9 处**（`break` / 撞咆哮，非逐字同构）；**五作各另有 9 处**（stageClear / interrupt，口径 12，见 §4.4 的 #1–#9） |
 | 工程文件 | **不需要**改 `thprac.vcxproj` / `.filters`（无新文件） |
 | 事件类型 | `miss` / `bomb` / `break` / **`interrupt`**（口径 12：未通关就退出游戏；**th14–th18 五作都产出**） |
@@ -336,7 +336,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 
 ### 5.1 单章节合并基线的状态迁移（口径 11 / 13）
 
-「单章节」判据与 `got` 的定义见口径 13（2026-10-18 修订，取代口径 11 原判据）：判据 = `(cpCount==2 && 含interrupt) || (cpCount==1 && 含miss/bomb/break)`；`got` 只数「无 miss/bomb/break」的尝试。实现是 `thprac_games.cpp` 匿名命名空间的两个助手 `GameSessionHasAttemptEvent()` / `GameSessionHasInterruptEvent()`。
+「单章节」判据与 `got` 的定义见口径 13（2026-10-18 修订，取代口径 11 原判据），**子句② 已由口径 16（2026-10-20）修订**：判据 = `(cpCount==2 && 含interrupt) || (cpCount==1 && 不是「只有interrupt」)`，后者即 `cpCount==1 && (含miss/bomb/break || eventCount == 0)`；`got` 只数「无 miss/bomb/break」的尝试。实现是 `thprac_games.cpp` 匿名命名空间的三个助手 `GameSessionHasAttemptEvent()` / `GameSessionHasInterruptEvent()` / `GameSessionOnlyInterruptEvents()`。
 
 `mMergeBase`（`GameSession` 私有成员）= 上一次写入的那一行。**纯内存态，进程重启即失效**（口径 11）；`data` 保留**首条**记录的全部字段（就地改写时只覆盖 `total`/`got`）。
 
@@ -367,6 +367,8 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 ## 7. 真机验证清单（**仅最小冒烟通过**）
 
 > 2026-10-18：th14–th18 五作各做了一次**最小冒烟**（练习启动 → 确认功能可用），结论是功能可用。**下列各项边界未逐项验证**，因此 8–11 条（单章节合并相关）仍按**未逐项验证**处理，不写成已通过。
+>
+> 2026-10-20：**口径 16 的合并修复真机验证通过** —— 同日、同起始 checkpoint、一条有事件一条零事件的两局，**合并为 1 行**（改前会各占一行）。此项通过；其余各项仍按**未逐项验证**处理。
 
 1. th16 练习启动一局 → 打几段 → 退出一局回菜单：`<数据目录>logger_sessions_YYYYMM.jsonl` 出现一行，字段与 IGI 面板对得上（`startCheckpoint` = 起始段落，`endCheckpoint` = 退出时段落，`events` 与 miss/bomb 计数一致）。
 2. 重开一局：上一局已落盘、新局开始（文件里多一行）。
@@ -375,7 +377,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 5. th14 / th15 / th17 / th18 各跑一次最小流程（启动 → 打一段 → 退出）：五作行都写进同一文件、`game` 字段正确。
 6. 对照 IGI 面板的 miss/bomb 计数与 `events` 条数（**重点 th18 的 cylinder**）。
 7. **th17 的 `break`（撞咆哮）**：练习启动一局 → 触发 ≥2 次撞咆哮 + ≥1 miss + ≥1 bomb → 回菜单：`"type":"break"` 条数 == IGI 面板「撞咆哮」计数（`THPRAC_INGAMEINFO_17_ROAR_BREAK_COUNT`）；每条 break 的 `checkpoint` 与触发时刻 IGI「当前段落」一致（允许 §8 #4 的一帧延迟）。顺带确认该局无 `eventsDropped`（撞咆哮与 miss/bomb 共用 256 上限，见 `knownBugs.md` #3）。
-8. **单章节合并（口径 11 / 13 / 14）**：练习 warp 到单个 section，连续重开 5 次（其中 3 次无 miss/bomb）→ 月度文件里**只有 1 行**，`total == 5`、`got == 3`（`interrupt` 不影响 `got`），且这 5 次之间**没有被追加新行**。注意：① 每次尝试都会带一条 `interrupt`（口径 12），判据靠的是 `cpCount==1 && 含miss` 或 `cpCount==2 && 含interrupt`；② 合并行**规范化为 `checkpointCount == 1` 且 `"events":[]`**（口径 14）；③ 重开 1 次（`total == 1`）时**不**规范化，仍带真实的 `checkpointCount` 与 `events`。
+8. **单章节合并（口径 11 / 13 / 14）**：练习 warp 到单个 section，连续重开 5 次（其中 3 次无 miss/bomb）→ 月度文件里**只有 1 行**，`total == 5`、`got == 3`（`interrupt` 不影响 `got`），且这 5 次之间**没有被追加新行**。注意：① 每次尝试都可能带一条 `interrupt`（口径 12；但口径 15 的 `spellFlag` 会抑制它），判据靠的是 `cpCount==1 && 不是「只有interrupt」`（口径 16：**零事件也算**）或 `cpCount==2 && 含interrupt`；② 合并行**规范化为 `checkpointCount == 1` 且 `"events":[]`**（口径 14）；③ 重开 1 次（`total == 1`）时**不**规范化，仍带真实的 `checkpointCount` 与 `events`。
 9. **合并的边界**：接上一条，换一个 section 再练 → **新起一行**；打一次全关（非单章节）→ 追加新行且**不带** `total`/`got`；把系统日期改到次日再练同一 section → 新起一行。
 10. **就地改写不破坏文件**：验证期间用 `tail` 确认文件**没有残留半行**（旧行更长时被 `SetEndOfFile` 截断干净），且此前已写入的行**一个字节都没变**。
 11. **五作同构**：th14/15/17/18 各做一次单章节练习（连续重开 ≥3 次），确认四作**同样合并**（各留 1 行、`total` 递增）——判定只看共享字段，与具体游戏无关。**注意口径 13 之后四作有一处行为变化**（`cpCount==2` 的干净局不再合并），见验证项 21。
@@ -392,7 +394,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 19. **th16 ST7 中boss B 路线不算通关**（`BossDeadB` 反例）：warp 到 `ST7 MID1` → 走 B 路线击破（`st07mbs2.BossDeadB`）→ 退出。预期**有** `interrupt`。**这条是 th16 `BossDeadB` 排除规则的专用反例**。
 20. **th15 ST7 的 `BossDeadB` 判定**（本次唯一未能静态钉死的一处）：`st07.decl:968/969` 的两条 `enmCreateA("Boss","BossB")` 之间无条件跳转 ⇒ 静态判断两个 boss 体**同时在场**、`BossDeadB` 结束的是附属身体，故未收录。真机确认：**清完 ST7 后退出，预期没有 `interrupt`**（若出现，说明 `BossB` 是独立路线，需要把 `BossDeadB` 收进 th15 的清单）。
 21. **换关复位**：全关从 ST1 打到 ST2，在 ST2 中途退出。预期**有** `interrupt`（ST1 已清但 ST2 未清 ⇒ 证明换关/段落入口复位生效）。
-22. **口径 13 判据**：① `cpCount==1` 且只有 `interrupt`（warp 进去没 miss 就退）⇒ **另起一行**，不并入；② `cpCount==2` 且含 `interrupt` ⇒ 并入；③ `got` 只数「无 miss/bomb/break」的尝试 —— 一个干净但被打断的尝试**仍计入 `got`**。
+22. **口径 13 / 16 判据**：① `cpCount==1` 且只有 `interrupt`（warp 进去没 miss 就退）⇒ **另起一行**，不并入（口径 13 原意保留）；② `cpCount==1` 且**零事件**（干净退出、`interrupt` 被 `spellFlag` 抑制）⇒ **并入**（口径 16）；③ `cpCount==2` 且含 `interrupt` ⇒ 并入；④ `got` 只数「无 miss/bomb/break」的尝试 —— 一个干净但被打断的尝试**仍计入 `got`**。
 23. **序列化自检**：确认 JSON 里出现的是 `"interrupt"` 而不是 `"?"`（`GameLogEventTypeName()` 漏 case 时 `/W4` 不报 C4062，只会静默输出兜底值）。
 
 > 上面 12–18 需在**每一作**各跑一遍（名字清单逐作不同）；20 只在 th15 跑。
@@ -417,7 +419,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | 12 | 各作 `IsStageClearSub` 的名字清单未真机验证 | 清单来自各作 `.decl` 全量枚举（静态完备），但「每帧采样能否稳定采到」只有真机能证；th16 的 `BossDead`（st05bs）是 0 帧转发壳，靠 60 帧的 `BossDeadp`/`BossDeadBp` 兜底。另 `BossEscape`/`BossDead2` 在 `.decl` 里无字符串引用（触发点在引擎侧），可达性未证 | 验证项 12–18 每作各跑一遍；§4.4.1 的表标 🟡 |
 | 13 | 关底收尾后 `mSection` 回退导致误复位 | boss 宿主 `delete()` 之后，若仍有白名单命中的宿主 / 异步线程存活，`mSection` 会从 `"STn BOSSx"` 回退到章节记录 ⇒ 触发一次「段落入口切换」复位 ⇒ 清关后立刻退到标题会误报 `interrupt` | 五作静态均不成立：boss 战期间主线程停在**不在白名单**的 sub（th16/th18 = `MainBoss`；th14/th15/th17 = `main`/`MainBoss` 均不在 CSV），且各作 `.decl` 的 `async` 派生体都不在白名单（th14 `@BossItemPhase`、th15 `@BossN_pos`/`@BossTrase`、th16 `@MainSub05` 约 700 帧即结束、th17 仅 ST3 `@MainSub01` 且在前半段结束）。真机若复现，最小修法是「收尾后 N 帧内忽略复位」。见 `knownBugs.md` |
 | 16 | th15 的 `BossDeadB` 是否该收录（**唯一未能静态钉死的一处**） | `st07bs2.BossDeadB` 的 body 与 `st07bs.BossDead` **形状完全一致**（`enmKillAll()` → `+60:` → `setBoss(-1)` → `delete()×2`）。静态判断为「附属身体收尾」（`st07.decl:968/969` 两条 `enmCreateA("Boss","BossB")` 之间无条件跳转 ⇒ 两个 boss 体同时在场；th15 的 ST7 白名单也没有任何 B 路线记录），故未收录；权威收尾 `st07bs.BossDead` 已收录 | 验证项 20（th15 真机跑一次 ST7 通关）。若清 ST7 后出现 `interrupt`，把 `BossDeadB` 加进 th15 的清单即可 |
-| 14 | `interrupt` 对单章节判定的影响 | 口径 11 的 `got` 与「单章节」判定原本都拿 `eventCount` 当「有 miss/bomb」的代理；口径 12 引入 `interrupt` 后该代理失真（单章节练习局按定义不推进到关底 boss ⇒ 必带一条 `interrupt` ⇒ `got` 被打成恒 0、`eventCount == 0` 分支变死代码） | **已由口径 13 收口**（2026-10-18）：判据改为 `(cpCount==2 && 含interrupt) \|\| (cpCount==1 && 含miss/bomb/break)`，`got` 只数「无 miss/bomb/break」的尝试。**代价**：th14/15/17/18 的 `cpCount==2` 干净局不再合并（定案接受，验证项 21）。见 `knownBugs.md` #10 |
+| 14 | `interrupt` 对单章节判定的影响 | 口径 11 的 `got` 与「单章节」判定原本都拿 `eventCount` 当「有 miss/bomb」的代理；口径 12 引入 `interrupt` 后该代理失真（单章节练习局按定义不推进到关底 boss ⇒ 必带一条 `interrupt` ⇒ `got` 被打成恒 0、`eventCount == 0` 分支变死代码） | **已由口径 13 收口**（2026-10-18），**子句② 再经口径 16 修订**（2026-10-20）：判据 = `(cpCount==2 && 含interrupt) \|\| (cpCount==1 && 不是「只有interrupt」)`，`got` 只数「无 miss/bomb/break」的尝试。**口径 13 遗留的代价**：th14/15/17/18 的 `cpCount==2` 干净局不再合并（定案接受，验证项 21）——口径 16 只动子句②，这条不变。见 `knownBugs.md` #10 |
 | 15 | 合并行不记 `events` | 口径 14 定案：合并行的 `events` 原本只反映**首条**尝试、不代表整行，故固定输出 `[]`。代价是合并行看不出任何 miss/bomb/break/interrupt 明细（只有 `total`/`got`） | 定案，不修。要明细请把 `total` 拆开看单条记录 |
 
 ---
@@ -445,3 +447,4 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | 2026-10-18 | **单章节练习合并落盘（口径 11）**：`GameSessionData` 增 `total`/`got`（`total == 0` 时整对从 JSON 省略）；`GameSession` 增私有 `MergeBase` 与 `MergeOrAppend()`，`Flush()` 改走它；`GameSessionAppendJsonLine()` 改回传 `GameSessionWriteResult`（含行偏移/长度），新增 `GameSessionRewriteJsonLine()`（`GENERIC_READ\|GENERIC_WRITE` + `size == offset+length` 守卫 + `SetEndOfFile`，`GuardFailed`/`IoFailed` 二分退化）。**合并逻辑全在共享层、默认开启，th14/15/16/17/18 五个 `.cpp` 零改动**（判定只用 `checkpointCount`/`eventCount`/起始 checkpoint/日期，与具体游戏无关）。非单章节记录的输出**逐字节不变**。**Release\|x86 编译通过、`thprac_games.cpp` 零警告；五作最小冒烟通过（仅确认功能可用，边界项未逐项验证）。** |
 | 2026-10-20 | **th16 新增 spellFlag（口径 15，仅 th16）**：修「`BossCard` checkpoint 在卡结束后不立刻切换 ⇒ 退出被误记 interrupt」。`thprac_th16.cpp` 增 `SPELL_OBJ_PTR = 0x4a6db0` / `kSpellFlagsOff = 0x78` / `SampleSpellCard()` / `mSpellFlag` / `mSpellObj` / `mSpellActive`，9 处接线见 §4.4.2；`mStageClear` **保留为兜底**（`BossDead+60` 窗口、非符期 `BossEscape`），interrupt 条件改为 `mSpellFlag <= 0 && !mStageClear`。检测复用每帧 `Update()`，**零新 hook、共享层零改动、无新事件类型**。静态核对 `setNext` 链（10 份 decl）无 card→card。**本机无编译环境：未编译、未真机（🟡）**。 |
 | 2026-10-20 | **spellFlag 推广到 th14/15/17/18（五作齐）**：逐作新增 `SampleSpellCard()` + `mSpellFlag/mSpellObj/mSpellActive`，9 处接线与 th16 逐字同构；常量逐作独立（§4.4.2.1）：th14 `0x4DB534+0x7C`、th15 `0x4E9A70+0x78`、th17 复用 `SPELLCARD_PTR=0x4B7690` + `+0x78`、th18 `0x4CF2C0+0x78`。`mStageClear` 五作均保留。th15 有第二清位点 `0x420EDA`（重开/载入），靠对象指针 / 换关 / 新局复位吸收。静态核对：th14 唯一 card→card 有 160 帧过渡；th15/17/18 均 0。逐作报告：`docs/th14|th15|th17|th18/thXX_spell_flag_report.md`。**本机无编译环境：未编译、未真机（🟡）**。 |
+| 2026-10-20 | **单章节子句② 修订（口径 16）**：口径 13 的子句② 由 `cpCount==1 && 含miss/bomb/break` 改为 `cpCount==1 && 不是「只有interrupt」`（即 `cpCount==1 && (含miss/bomb/break \|\| eventCount == 0)`）。起因：口径 15 的 `spellFlag` 抑制 `interrupt` ⇒ 零事件的 `cpCount==1` 可达，旧判据把它打成「非单章节」并**作废合并基线**（`MergeOrAppend()` 分支 1），同日同起始 checkpoint 的连续练习漏合并。`thprac_games.cpp` 新增 `GameSessionOnlyInterruptEvents()`，`GameSessionIsSingleChapter()` 子句② 改用它；子句① 与「只有 interrupt ⇒ 不算」不变。**共享层改动 ⇒ 五作都生效**。**Release\|x86 编译通过；真机验证通过（2026-10-20）**。 |
