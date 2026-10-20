@@ -254,6 +254,58 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 
 > **不新增任何地址**：全部复用各作既有的宿主遍历（th14 走 `NameOfIp`，th15/16/17 走 sub 索引表，th18 的宿主链头是 `mgr+0x18C`），与 `IsMidBossEndSub` 同一个采样点。**各作的名字清单与复位规则均未真机验证（🟡）**。
 
+#### 4.4.2 spellFlag 补充（口径 15，**th14–th18 五作**）
+
+2026-10-20 落地（先在 th16，随后推广到 th14/15/17/18）：修「某些 `BossCard` checkpoint 在卡结束后不立刻切换、退出时被误记 `interrupt`」。**只关心「符卡结束」，不区分收取/失败**；`mStageClear` **保留为兜底**（不删除）。
+
+下表是 **th16 的落点**，同时作为五作模板；其余四作只是常量与插入行号不同（见 §4.4.2.1），9 处结构逐字同构。
+
+| # | 位置（`thprac_th16.cpp`） | 改动 |
+| --- | --- | --- |
+| 1 | `enum addrs`（:14） | `SPELL_OBJ_PTR = 0x4a6db0` |
+| 2 | 匿名 namespace（:42） | `constexpr uintptr_t kSpellFlagsOff = 0x78;` |
+| 3 | `TH16Logger` private 成员（:174） | `int32_t mSpellFlag = 0; uintptr_t mSpellObj = 0; bool mSpellActive = false;` |
+| 4 | 私有方法声明（:154） | `void SampleSpellCard();` |
+| 5 | `SampleSpellCard()`（`OnBomb()` 之后） | 读 `*(u32*)0x4A6DB0`：空 ⇒ 只清 `mSpellObj/mSpellActive`（**保留 `mSpellFlag`**）；`obj != mSpellObj` ⇒ 三者复位（新对象）；`mSpellActive && !(flags & 1)` ⇒ `++mSpellFlag` |
+| 6 | `OnStageStart()`（:238） | 三者复位 |
+| 7 | `Update()` 顶部（interrupt 之前，:291） | `SampleSpellCard();` + 条件改 `mSpellFlag <= 0 && !mStageClear && mSession.IsGameExitEdge(inGame)` |
+| 8 | `Update()` 换关块（:320） | 三者复位（该块在采样**之后**执行，可抹掉换关的假下降沿） |
+| 9 | `Update()` 段落变化块（:445） | `if (mSpellFlag > 0) --mSpellFlag;`（在 `mStageClear = false` 之前） |
+
+**顺序约束（三条都不能反）**：
+
+1. `SampleSpellCard()` 在 interrupt 判定**之前** ⇒ 同帧「清卡 + 退出」也能吃到 `++`。
+2. `++` 在 `Update()` 顶部、`--` 在段落裁决之后 ⇒ 同帧「卡结束 + 新 checkpoint」净 0；反过来会残留 1，吞掉之后整关的 `interrupt`。
+3. 换关复位在采样之后 ⇒ 换关/对象销毁的假下降沿当场抹掉；对象为空时**不清 `mSpellFlag`**，否则退出帧没用上就先被清了。
+
+**静态证据**：
+
+- `obj+0x78` bit0 的置位**只有** `0x417F76`（`or eax,3`，`FUN_00417F00`），清位**只有** `0x41832F`（`and [esi+0x78],~1`，`FUN_004182F0` = `spellEnd`）。
+- `spell`/`0x21A`/`spell3`/`spellEx` 四个 opcode 全部走 `0x421757` → `0x42182A mov ecx,[0x4a6db0]` → `0x42183F call FUN_00417F00` ⇒ **一个对象、一个槽**，中boss 与 Extra 同样覆盖。
+- **一帧一采样不会漏**：th16 的 `setNext` 链是「非符 → 符卡 → 非符 → 符卡」交替（`st01bs`–`st07bs`、`st03mbs`、`st07mbs`、`st07mbs2` 共 10 份 decl 静态核对，**无 card→card**）⇒ 每张卡结束后 bit0 至少保持 0 到下一个非符结束（1500–5400 帧）。
+- **保留 `mStageClear` 的两处兜底**：关底 `BossDead` 是 `+60:` 才 `spellEnd()`（爆炸后 60 帧内无下降沿，ST6 因 `gameSpeed(0.5)` 约 2 s）；`BossEscape` 由引擎在 boss 宿主创建时注册，可在**非符期**触发（`spellEnd` 为 no-op，无下降沿）。
+
+**未做**：本机（macOS）无编译环境，**未编译、未真机**（🟡）；验证项见 `docs/th16/th16_spell_flag_report.md` §8.4 与本文件 §7。
+
+#### 4.4.2.1 逐作常量与证据（**不可跨作外推**）
+
+| 作 | 对象全局 | 存活位 | 大小 | 置位点 | 清位点 | 轮询 / 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **th14** | `0x4DB534` | **`+0x7C` bit0** | `0xC0` | `0x41CBE7` | `0x41D492`（唯一） | 唯一真实 card→card = `st05bs BossCard3→BossCard4`，但 `BossCard4` 声明前有 `wait(160)` ⇒ 不漏。`+0x78` 是 spell id |
+| **th15** | `0x4E9A70` | `+0x78` bit0 | `0xBC` | `0x42047F` | `0x420D62` + **`0x420EDA`** | card→card = 0；第二清位点（重开/载入强制清卡）可能有假下降沿，靠对象指针 / 换关 / 新局复位吸收 |
+| **th16** | `0x4A6DB0` | `+0x78` bit0 | `0xBC` | `0x417F76` | `0x41832F`（唯一） | card→card = 0（`BossCard1Hide` 是无 `spell()` 的辅助 sub，不计） |
+| **th17** | `0x4B7690`（既有 `SPELLCARD_PTR`） | `+0x78` bit0 | `0xC0` | `0x41AD58` | `0x41B181`（唯一） | card→card = 0；**`+0x1C` 是 ANM 句柄，不能当存活位** |
+| **th18** | `0x4CF2C0` | `+0x78` bit0 | `0xC0` | `0x42A388` | `0x42A7C2`（唯一） | card→card = 0；无 eclmap，opcode 用 `ins_NNN` 锚点 + 分发表 `0x4366F4`/`0x436438` 双重验证 |
+
+**五作共同点**：
+
+- 声明（`spell`/`spell3`/`spellEx`）置位、`spellEnd()` 清位；`spellEnd()` 结算**上一张**卡、无卡时 no-op。
+- 每张卡后必接一个非符攻击阶段 ⇒ 一帧一次轮询不会漏（th14 的唯一例外也有 160 帧过渡）。
+- `mStageClear` 全部保留：关底 `BossDead` 的 `+60` 帧窗口、非符期 `BossEscape` 都没有卡结束事件。
+- 覆盖洞（不产生事件、也不在 CSV）：th15 `st02mbs MBossCard1`（无 `spell()`）、th15 `st07bs2 BossCardB10` / th16 `st07mbs2 MBossBCard*` / th16 `st05bs BossCard3Bp`（仅 `spellMode`）。th14 / th17 / th18 的关底末阶段全部是符卡。
+- 五作均**未编译、未真机**（🟡），逐作验证项见各作 `docs/thXX/thXX_spell_flag_report.md`。
+
+
 ---
 
 ## 5. 一局状态机
@@ -269,6 +321,8 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | **miss / bomb / break** → `PushEvent(type, mSection)` | `events[eventCount++] = {type, mSection}`；满则 `++droppedEvents` | 零 |
 | **关底 boss 死 / 逃收尾 sub**（口径 12，五作） | `mStageClear = true`（`Update()` 段落裁决之后） | 零 |
 | **段落入口函数切换 / 换关 / 新局**（口径 12） | `mStageClear = false` | 零 |
+| **符卡结束（bit0 1→0）**（口径 15，th14–th18 五作） | `mSpellFlag++`（`Update()` 顶部，interrupt 判定之前） | 零 |
+| **新 checkpoint**（口径 15，th14–th18 五作） | `mSpellFlag--`（下限 0，`Update()` 段落裁决之后） | 零 |
 | **`PLAYER_PTR` 由非 0 变 0** → 先 `IsGameExitEdge` + `PushEvent(Interrupt, mSection)`（五作），再 `Tick(false)` | `events[]` 追加一条 `interrupt`；然后 `mPending = mCur; mHasPending = true; mCur = {}; mOpen = false` | 零 |
 | **落盘** → `Tick()` 末尾 | 若 `mHasPending`：`Flush(mPending)` → `MergeOrAppend()` —— 单章节且可合并则**就地改写上一行**，否则追加新行 → 清空 | **堆 + 文件 IO（一局一次）** |
 | **强退进程** | 不落盘（主动放弃） | — |
@@ -389,3 +443,5 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | 2026-10-18 | **单章节判据修订 + `got` 无视 interrupt（口径 13）**：口径 12 的 `interrupt` 让 th16 每个练习局都带一条事件 ⇒ 口径 11 原判据的 `eventCount == 0` 分支变死代码、`got` 被打成恒 0。改为「单章节」= `(cpCount==2 && 含interrupt) \|\| (cpCount==1 && 含miss/bomb/break)`，`got` = 「无 miss/bomb/break」的尝试数（`thprac_games.cpp` 匿名命名空间新增 `GameSessionHasAttemptEvent()` / `GameSessionHasInterruptEvent()`，`GameSessionIsSingleChapter()` 与 `MergeOrAppend()` 的两处 `got` 改用它们）。**代价（定案接受）**：不产出 `interrupt` 的 th14/15/17/18，其 `cpCount==2` 的干净练习局**不再合并**。**Release\|x86 编译通过；真机未测。** |
 | 2026-10-18 | **stageClear + interrupt（口径 12，仅 th16）**：共享层 `GameLogEventType` 增 `Interrupt`、`GameLogEventTypeName()` 补 case、`GameSession` 增 `IsGameExitEdge()`（暴露 Tick 内部那条下降沿判据）；`thprac_th16.cpp` 增 `IsStageClearSub()`（5 个名字的 `strcmp` 精确匹配）+ `mStageClear` + 9 处接线（§4.4）。**不新增任何 EHOOK、不新增任何地址**；`thprac_games.cpp` 零改动（合并判据按定案保持原样）。**Release\|x86 编译通过；真机未测（🟡）**。 |
 | 2026-10-18 | **单章节练习合并落盘（口径 11）**：`GameSessionData` 增 `total`/`got`（`total == 0` 时整对从 JSON 省略）；`GameSession` 增私有 `MergeBase` 与 `MergeOrAppend()`，`Flush()` 改走它；`GameSessionAppendJsonLine()` 改回传 `GameSessionWriteResult`（含行偏移/长度），新增 `GameSessionRewriteJsonLine()`（`GENERIC_READ\|GENERIC_WRITE` + `size == offset+length` 守卫 + `SetEndOfFile`，`GuardFailed`/`IoFailed` 二分退化）。**合并逻辑全在共享层、默认开启，th14/15/16/17/18 五个 `.cpp` 零改动**（判定只用 `checkpointCount`/`eventCount`/起始 checkpoint/日期，与具体游戏无关）。非单章节记录的输出**逐字节不变**。**Release\|x86 编译通过、`thprac_games.cpp` 零警告；五作最小冒烟通过（仅确认功能可用，边界项未逐项验证）。** |
+| 2026-10-20 | **th16 新增 spellFlag（口径 15，仅 th16）**：修「`BossCard` checkpoint 在卡结束后不立刻切换 ⇒ 退出被误记 interrupt」。`thprac_th16.cpp` 增 `SPELL_OBJ_PTR = 0x4a6db0` / `kSpellFlagsOff = 0x78` / `SampleSpellCard()` / `mSpellFlag` / `mSpellObj` / `mSpellActive`，9 处接线见 §4.4.2；`mStageClear` **保留为兜底**（`BossDead+60` 窗口、非符期 `BossEscape`），interrupt 条件改为 `mSpellFlag <= 0 && !mStageClear`。检测复用每帧 `Update()`，**零新 hook、共享层零改动、无新事件类型**。静态核对 `setNext` 链（10 份 decl）无 card→card。**本机无编译环境：未编译、未真机（🟡）**。 |
+| 2026-10-20 | **spellFlag 推广到 th14/15/17/18（五作齐）**：逐作新增 `SampleSpellCard()` + `mSpellFlag/mSpellObj/mSpellActive`，9 处接线与 th16 逐字同构；常量逐作独立（§4.4.2.1）：th14 `0x4DB534+0x7C`、th15 `0x4E9A70+0x78`、th17 复用 `SPELLCARD_PTR=0x4B7690` + `+0x78`、th18 `0x4CF2C0+0x78`。`mStageClear` 五作均保留。th15 有第二清位点 `0x420EDA`（重开/载入），靠对象指针 / 换关 / 新局复位吸收。静态核对：th14 唯一 card→card 有 160 帧过渡；th15/17/18 均 0。逐作报告：`docs/th14|th15|th17|th18/thXX_spell_flag_report.md`。**本机无编译环境：未编译、未真机（🟡）**。 |
