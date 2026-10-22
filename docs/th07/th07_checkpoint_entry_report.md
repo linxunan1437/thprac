@@ -26,7 +26,7 @@
 | 6 | 同时间多分节 | 🟡 **15 组** | 副键＝补丁落点所属 sub（`SubN` + decl 行号）＋ `thFakeShot`（§3）；**ST4 三姐妹的 BOSS1 组在 ECL 侧完全没有差异**。 |
 | 7 | 跨类型同值 | ✅ **1 处、已裁决** | `ST6 #2`（章节）与 `ST6 CHAOS`（boss 轴）同为 1180 ⇒ **保留 CHAOS、删除 #2**（§3.3）。 |
 | 8 | 与 §11 的差异 | ⚠️ **值无错、表述有错** | §11.1 列名 / 列位错（`后半 #5..#8`）、§11.2 是分组汇总而非逐行（§5）。**未改 `th07_ecl_re_report.md`**，留主代理收口。 |
-| 9 | 真机 | ❌ **未做** | 全部 🟡；待验清单见 §7。 |
+| 9 | 真机 | ❌ **未做** | 全部 🟡；待验清单见 §8 / §7.7。 |
 
 ---
 
@@ -637,7 +637,145 @@ sys.exit(1 if bad else 0)
 
 ---
 
-## 7. 实现影响与待真机清单（全部 🟡）
+## 7. 监控两级判定流程（E5 实现口径，🟡 未真机）
+
+> 本节回答一个实现层必答题：**CSV 第 1 列的时间值在 boss 段大量重复，监控凭什么分辨「现在打到第几个相位」？**
+> 结论：**单靠这一列做不到，必须两级判定**。一级＝时间轴（确认进了哪个 boss 容器），二级＝boss 脚本的**指令位置**（确认相位）。
+> 本节所有地址/位移沿用 `docs/th07/th07_ecl_re_report.md`；结论仍为 **🟡 静态定案、未真机**。
+
+### 7.1 为什么一级键必然重复（数据事实）
+
+- CSV **140 行只有 53 个不同时间值**；**17 组重复值覆盖 104 行**。
+- 最极端：时间 `9259`（`ST8 END_*` 系）**19 行**、`8799`（`ST7 END_*`）**18 行**、`14827`（`ST4` 三姐妹系）**15 行**。
+- 根因：`THPatch` 的 `ECLTimeWarp(count,time)` 只把**时间轴**打到「该 boss 容器的入口」一次；区分 BOSS1/2/3/4 的是**就地改写 boss 脚本字节**（`ECLSetTime` / `ECLCallSub` / `pair{off,val}`），**这些补丁不动时间轴**。
+- ⇒ 同一 boss 的所有相位共享同一时间值；`latch`（最大入口 ≤ t）只能给出「进入了这个 boss」，给不出「第几相位」。
+
+**示例（ST1，`thprac_th07.cpp:1175-1190`）**：
+
+| 记录名 | time | 与上一行相同，靠什么区分 |
+| --- | --- | --- |
+| ST1 BOSS1 | 5043 | 基准相位（无额外补丁，仅 `ECLNameFix`） |
+| ST1 BOSS2 | 5043 | `ECLSetTime(0x4c20,0x3c,0)` ⇒ 相位边界在 **buf+0x4c20** |
+| ST1 BOSS3 | 5043 | `pair{0x4c2c,0x27} …` ⇒ 边界 **buf+0x4c2c** |
+| ST1 BOSS4 | 5043 | `pair{…} + ECLSetTime(0x4f44,0,0)` ⇒ 边界 **buf+0x4f44** |
+
+> 这些 `0x4c20/0x4c2c/0x4f44` **就是 boss 脚本里的指令文件偏移**（相对 `buf`），也是相位分界。§3 的逐行「补丁落点」表已给全 15 组。
+
+### 7.2 两级模型
+
+```text
+每帧：
+  ① 一级：读时间轴 → 定位「当前是哪个 boss 家族 / 哪个章节段」（白名单 = CSV 第 1 列）
+  ② 二级：读 boss 对象的当前指令指针 → 落在哪个「相位区间」→ 具体 STn BOSSx
+  ③ 合并：一级给出的记录名 + 二级给出的相位 → 最终段落名；任一级无命中 ⇒ no-op（保持上一个值，不回退 main）
+```
+
+### 7.3 一级：时间轴（容器判定）
+
+```cpp
+const uint32_t mgr      = 0x9A9B00;                        // ENEMY_MANAGER（静态，无需捕获）
+const uint32_t eclBuf   = *(uint32_t*)0x1347938;           // buf = ECL 文件缓冲基址
+const uint16_t tlCount  = *(uint16_t*)(eclBuf + 2);         // 活动 timeline 数（本关）
+int32_t  tlTime = *(int32_t*)(mgr + 0x9545F4 + 0x8);        // = *(int32_t*)0x12FE0FC（TL_0+8）
+uint32_t tlIp   = *(uint32_t*)(mgr + 0x9545F4 + 0xC);       // = *(uint32_t*)0x12FE100（TL_0+0xC）
+```
+
+- 用 `tlTime` 在本关白名单里做「最大入口 ≤ t」→ 得到**候选记录名**。
+- 命中多个同值时（本作 17 组），**不要在这里二选一**，进入二级。
+- `tlCount` 可用于 sanity：`0` ⇒ 未进关/已结束，直接 no-op。
+
+### 7.4 二级：boss 脚本位置（相位判定）
+
+**取 boss 对象**（`mgr+0x954598` 起的 8 槽，空槽 = 0）：
+
+```cpp
+uint32_t boss = 0;
+for (int k = 0; k < 8; ++k) {
+    uint32_t e = *(uint32_t*)(mgr + 0x954598 + k * 4);
+    if (e) { boss = e; break; }          // ⚠ 中boss + 关底可能同时在槽：需按 ip 落在哪个 boss sub 区间来挑，见 §7.5
+}
+uint32_t bossIp   = *(uint32_t*)(boss + 0x6E4);   // 当前 sub 指令指针（绝对地址）
+int32_t  bossTime = *(int32_t*)(boss + 0x6F0);    // 敌方 VM 当前时间（备用键）
+int32_t  depth    = *(int32_t*)(boss + 0x2A7C);   // 调用深度（0..0xF）
+```
+
+**相位区间规则（推荐，数据已具备）**：
+
+1. 每个 boss 家族有一组**补丁偏移** `off[]`（§3 表里的 `pair@0x…` / `ECLSetTime@0x…`），按 `off` **升序**排序。
+2. `ipOff = bossIp - eclBuf`；取**最后一个 `off[i] <= ipOff`** 的相位；`ipOff` 小于最小边界 ⇒ 该家族的第一个相位。
+3. **只用 `ip` 位置，不读补丁内容** —— 正常游玩时 thprac 根本没打补丁，读字节会读到原始值。
+4. 同一家族内**相位索引单调不减**（latch）：允许跳级（一键打到后期相位），**不允许回退**；仅在「换 boss 家族 / 换关 / 新局 / `bossIp` 出界」时复位。
+
+**ST1 的具体区间**（`Sub38` 内）：
+
+| `ipOff` 落点 | 相位 |
+| --- | --- |
+| `< 0x4c20`（含脚本开头） | `ST1 BOSS1` |
+| `[0x4c20, 0x4c2c)` | `ST1 BOSS2` |
+| `[0x4c2c, 0x4f44)` | `ST1 BOSS3` |
+| `≥ 0x4f44` | `ST1 BOSS4` |
+
+> ⚠️ 上表的 4 个边界取自 §3 的补丁偏移，**未经真机确认「相位确实在这些偏移处切换」**。若真机发现边界错位，只需改边界表，不动 CSV。
+
+### 7.5 边界与已知不可解
+
+1. **中boss 与关底同时存活**：`mgr+0x954598` 可能有多个非空槽。做法：对每个非空槽算 `ipOff`，取「落在某个 **boss 家族**区间内」的那个；都落在区间外 ⇒ 视为无 boss、回退到一级结果。
+2. **boss 脚本发生 `call sub`（`depth > 0`）**：此时 `bossIp` 在**被调 sub** 里，不在 boss 主脚本区间内 ⇒ 区间法会 miss。缓解：`depth > 0` 时沿调用栈 `boss+0x8FC + level*0x218` 找到**最外层（level 0）**的游标再用；找不到就 no-op。（🟡 栈布局见逆向报告 §4。）
+3. **同偏移的相邻相位**：若两个相位的补丁落在**同一偏移**，区间法会合并它们 ⇒ 退化为**按 boss 脚本时间**（`*(int32_t*)(boss+0x6F0)`，敌方 VM 当前时间）切区间；仍不可分则按**先命中**处理并记日志。（不要读「补丁写进去的字节」判相位：正常游玩时 thprac 没打补丁，读到的是原始值。）
+4. **ST4 三姐妹 `BOSS1_*` / `BOSS2_*`（6 行）**：ECL 侧完全无差异（无 `call`、补丁相同），**区间法也分不开**。按 2026-10-22 裁决：**属游戏特性、不算 bug**，logger 层可另读游戏侧自机/机体状态（`character=0x62F645`、`shotType=0x62F646`）；在此之前这 6 行会互相误命中。
+5. **`ST6 CHAOS`**：CSV 已删 `ST6 #2`，只剩 `ST6 CHAOS`（1180），一级唯一，无需二级。
+6. **dlg 分支**：同级时间可能差 1（10 行双值，CSV 取大值）⇒ 一级匹配用 `|t - entry| <= 1` 或「取最大入口 ≤ t + 1」。
+7. **关卡/新局/重开**：`tlCount == 0` 或 `STAGE_NUM` 变化 ⇒ 清空当前段落与所有相位状态。
+
+### 7.6 伪代码（可直接翻成 C++）
+
+```cpp
+struct Phase { const char* name; uint32_t lo; };   // lo = buf 内偏移下界（升序）
+// 由 §3 表机器生成，例：ST1 = {{"ST1 BOSS1",0},{"ST1 BOSS2",0x4c20},{"ST1 BOSS3",0x4c2c},{"ST1 BOSS4",0x4f44}}
+
+const char* ResolveBossPhase(const Phase* ph, int n, uint32_t ipOff, int& lastIdx) {
+    if (ipOff == 0) return nullptr;                  // ip 无效
+    int idx = (lastIdx >= 0) ? lastIdx : 0;          // 单调：从上次相位起找
+    for (int i = n - 1; i >= idx; --i)               // 跳过已过的相位（不允许回退）
+        if (ipOff >= ph[i].lo) { lastIdx = i; return ph[i].name; }
+    return nullptr;                                   // 未到第一个边界 ⇒ 保持上一值
+}
+
+void Tick() {
+    const uint32_t mgr = 0x9A9B00, buf = *(uint32_t*)0x1347938;
+    if (*(uint16_t*)(buf + 2) == 0) { Reset(); return; }         // 未进关
+    int32_t t = *(int32_t*)(mgr + 0x9545F4 + 0x8);
+    const char* chap = MatchTimelineLatch(t);                    // 一级：CSV 白名单
+    uint32_t boss = PickBossSlot(mgr, buf);                      // §7.5-1
+    if (boss) {
+        uint32_t bip = *(uint32_t*)(boss + 0x6E4);
+        if (bip <= buf) { /* 游标无效：本帧只用一级 */ }
+        uint32_t ipOff = bip - buf;                              // 需保证 bip > buf
+        if (ipOff > 0x40000) ipOff = 0;                          // 越界保护（ECL 缓冲远小于 256KB）
+        int32_t  depth = *(int32_t*)(boss + 0x2A7C);
+        if (depth > 0) ipOff = OuterCursorIp(boss) - buf;        // §7.5-2
+        if (const char* n = ResolveBossPhase(PhasesOf(chap), N, ipOff, mLastPhase))
+            { mSection = n; return; }
+    }
+    if (chap) mSection = chap;                                   // 只有一级就先用一级
+}
+```
+
+### 7.7 实现前必须先补的两件事（E5 的第 0 步）
+
+1. **生成相位边界表**：新增/扩展 `docs/logger/tools/gen_th07_checkpoints.py`，从 `thprac_th07.cpp` 的 `THPatch` 里**按 section 解析补丁偏移**（`ECLSetTime(off,…)` / `pair{off,…}` / `ECLCallSub(off,…)`），输出「section → 升序 offset[]」并嵌入生成物 `thprac_th07_checkpoints_gen.cpp`。**人工抄表不可接受**（§3 有 15 组、上百个偏移）。
+2. **确认 boss 槽的唯一性**：真机上打印 `mgr+0x954598` 的 8 个槽与各自 `ipOff`，确认「中boss＋关底」的实际占用与挑槽规则（§7.5-1 目前是推演）。
+
+### 7.8 真机验证清单（🟡 全部未做）
+
+- [ ] 进每个 boss，打印 `tlTime` / `tlIp` / 槽号 / `bossIp−buf` / `depth`，确认一级时间值与 CSV 一致。
+- [ ] 逐相位打一遍，确认 `ipOff` 的**跳变点**恰好是 §7.4 的边界（每个 boss 家族至少验一组：ST1 四相位、ST4 三姐妹、ST6 BOSS1..10）。
+- [ ] `depth > 0` 的相位（有 `call sub` 的）确认 `OuterCursorIp` 能否取到主脚本游标。
+- [ ] 中boss 与关底并存、以及「打掉中boss 后」的槽变化。
+- [ ] 练习模式直接 warp 到后期相位（补丁已打）与**正常游玩**（无补丁）两种路径，`ipOff` 是否都能落到正确区间。
+- [ ] attract / replay / 暂停 / 重开：复位是否正确。
+
+## 8. 实现影响与待真机清单（全部 🟡）
 
 1. 🟡 **采样**：`time = *(int32_t*)0x12FE0FC`（＝`mgr+0x9545FC`＝`TL_0+8`，报告 §10.2）；`count = *(u16*)(*(u32*)0x1347938 + 2)`。
 2. 🟡 **latch 的并列项**：同一时间值有多个白名单项时，「最大入口 ≤ t」不唯一 ⇒ 需**显式 tie-break**（建议：同值时按 §3 副键；无副键时保留先命中的那一条，不回退）。
@@ -651,9 +789,10 @@ sys.exit(1 if bad else 0)
 
 ---
 
-## 8. 变更记录
+## 9. 变更记录
 
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-22 | 建档 + 全表回填。`docs/logger/th07_checkpoints.csv` 第 1 列填 **141/141**（章节 38/38、boss 103/103，无留空）：值＝`ECLTimeWarp` 的 `time` 入参，dlg 双值 **10 行取非 dlg**。用 2026-10-21 新入本机的 `../exes/ecl/th07/ecldata1..8.ecl` + `ecldump/*.decl` 做交叉验证：确认 th07 ECL 头（`subCount`/`timelineCount`/`tlStart[]`/`subOffset[]@0x44`）与 8 B 指令头，`.decl` 含 `timeline TimelineN()` 块，**762 sub + 17 timeline、22413 条实指令**（＋16 条终止符）与 decl 逐条对齐；boss **100/103** 精确命中 `ins_8(0)`/`ins_9(0)`、10 行 dlg 双值 10/10 命中。登记 **15 组同时间多分节**的副键、**1 处跨类型同值**（`ST6 #2`=`ST6 CHAOS`=1180）、**3 行无精确时间戳**（ST1 MID1/MID2、ST3 MID1）与 **§11 的 8 条差异**（值无错，列名/列位/粒度/注有错）。**未改 `th07_ecl_re_report.md` / `th08` / `logger_progress.md`；未编译、未运行、未改任何 exe/ecl/decl。全部 🟡 未真机。** |
 | 2026-10-22 | **用户裁决落地，行数 141 → 140**：`ST6 #2`（章节，1180）与 `ST6 CHAOS`（boss 轴，1180）经 ECL 侧交叉验证为**同一条指令**（`ecldata6.decl` Timeline0 t=1180 的 `ins_0`），时间与 ECL 状态均不可区分 ⇒ 按用户决定**删除 `ST6 #2`、保留 `ST6 CHAOS`**，CSV 变为 **章节 37 + boss 103 = 140**，`verify_th07_entries.py` 期望值同步。**ST4 三姐妹（BOSS1/BOSS2 各 3 行）经裁决维持现状**：属游戏特性（姐妹由自机/子机选择决定），不算 bug、不登记 `knownBugs`，logger 层可另行区分。**未改 `th07_ecl_re_report.md`**（§11 的表述订正由主代理统一收口）。 |
+| 2026-10-22 | **新增「监控两级判定流程」节（E5 实现口径，🟡 未真机）**：说明 boss 段时间值必然重复（th07 140 行/53 个值、th08 141 行/67 个值），一级键只定「boss 容器」，相位须二级读 boss 脚本位置；给出完整读取链、签名/区间推导规则、伪代码、宿主挑法与边界，以及实现前必须先做的生成脚本与真机采样项。**CSV 未改**。 |

@@ -461,7 +461,7 @@ PASS：158 行 = 章节 37 + boss 121；已填 141（章节 37 + boss 104）；1
 
 > 2026-10-22 用户裁决：**① 改读 Timeline 车道**；**② offset 单键**；**③ 同值分节属实现层限制，接受**；**④ `LW 1..17` 无监控意义，留空、不算缺口**。
 
-1. ✅ **读取面（§6.2）**：141 个 offset 全在时间轴车道命令区、与 sub 指令链交集为空 ⇒ 报告 §9.2 的「读宿主 cursor 的 `cur_ins − pECL` 精确匹配」**作废**，改为读 **Timeline 车道**（`TL=0xF54CF0`，`slot+8`=time、`slot+0xC`=命令指针；`ECLWarp` 写的正是这两个字段）。CSV 表头 `时间轴位置` 与此一致。**待主代理把该结论回填 `th08_ecl_re_report.md` §9.2 / §0。**
+1. ✅ **读取面（§6.2 / §9.4）**：141 个 offset 全在时间轴车道命令区、与 sub 指令链交集为空 ⇒ 报告 §9.2 的「读宿主 cursor 的 `cur_ins − pECL` 精确匹配」**作废**，改为读 **Timeline 车道**（`TL=0xF54CF0`，`slot+8`=time、`slot+0xC`=命令指针；`ECLWarp` 写的正是这两个字段）。CSV 表头 `时间轴位置` 与此一致。**待主代理把该结论回填 `th08_ecl_re_report.md` §9.2 / §0。**
 2. ✅ **匹配键（§6.3）**：**offset 单键**。CSV 的 `time` 是 `ECLWarp` 入参（warp 目标时间），不是落点命令自身的 time（39 行不同，多为 +60），故 time **只作日志可读性/辅助校验**，不参与相等判定。
 3. ✅ **同值分节（§3）**：接受「同一 `(time,offset)` 的多相位不可分」为**已知实现层限制** —— 监控只按 `(offset)` 命中，`ST5 BOSS1..7`、`ST6A/B BOSS1..9`、`ST7 END_*` 等组需在实现层配合 `THPatch` 补丁语义另行消歧；**不在 CSV 里造伪副键**。
 4. ✅ **`LW 1..17`**：用户 2026-10-22 决定「LW 无监控意义」⇒ 17 行**有意留空**，不做 ECL 反推，**不计入缺口**。
@@ -470,7 +470,129 @@ PASS：158 行 = 章节 37 + boss 121；已填 141（章节 37 + boss 104）；1
 
 ---
 
-## 9. 与其它文档的关系
+## 9. 监控两级判定流程（E5 实现口径，🟡 未真机）
+
+> 本节回答实现层必答题：**CSV 第 1 列 `(time, offset)` 在 boss 段大量重复，监控凭什么分辨「现在打到第几个相位」？**
+> 结论：**单靠这一列做不到，必须两级判定**；且 **th08 的二级规则与 th07 不同** —— th08 的偏移**不按相位单调**，不能用「按 offset 切区间」。
+> 地址沿用 `docs/th08/th08_ecl_re_report.md`；结论仍为 **🟡 静态定案、未真机**。
+
+### 9.1 为什么一级键必然重复（数据事实）
+
+- CSV 已填 **141 行只有 67 个不同值**；**17 组重复覆盖 91 行**。
+- 最极端：`9497/0x152C8`（`ST7 END_*`）**18 行**、`4022/0xC838`（`ST6A BOSS1..9`）**9 行**、`4112/0x10548`（`ST6B BOSS1..9`）**9 行**。
+- 根因与 th07 相同：`ECLWarp` 只把**车道**打到「boss 容器入口」一次；区分相位的，是随后对 **boss 脚本字节**的就地改写（`ECLSetTime` / `ECLTimeFix` / `ECLJump` / `ECLCallSub`），**不动车道**。
+- ⇒ 一级（车道）只能给出「进入了这个 boss」，给不出「第几相位」。
+
+### 9.2 两级模型
+
+```text
+每帧：
+  ① 一级：读 Timeline 车道（slot+8 / slot+0xC）→ 命中哪个「boss 容器」白名单项
+  ② 二级：读 boss 宿主对象的 cursor（sub_id + 脚本时间 + ip）→ 落在哪个「相位签名」上
+  ③ 合并：一级记录名 + 二级相位 → 最终段落名；任一级无命中 ⇒ no-op（保持上一个值，不回退 main）
+```
+
+### 9.3 一级：Timeline 车道（容器判定）
+
+```cpp
+const uint32_t pECL      = *(uint32_t*)0x4ECCB8;        // ECL 文件缓冲基址（静态单例）
+const int16_t  slotCount = *(int16_t*)(pECL + 6);        // 本关车道数
+// 车道数组：TL = 0xF54CF0（= 0x577F20 + 0x9DCDD0），slot[i] = TL + i*0x10
+for (int i = 0; i < slotCount; ++i) {
+    int32_t  t   = *(int32_t*)(0xF54CF0 + i*0x10 + 0x08);   // 目标时间（= ECLWarp 的 time1）
+    uint32_t cmd = *(uint32_t*)(0xF54CF0 + i*0x10 + 0x0C);  // 命令指针（= pECL + offset1）
+    uint32_t off = cmd - pECL;
+}
+```
+
+- 用 `off`（**单键**，2026-10-22 裁决）与白名单精确相等匹配 → 候选记录名；`t` 只作日志/校验（实测 39 行 `t` 与落点命令自身 time 不等）。
+- 命中多个同值时（17 组），**不要在这里二选一**，进入二级。
+
+### 9.4 二级：boss 脚本位置（相位判定）——**与 th07 不同**
+
+**为什么不能照抄 th07 的「offset 升序切区间」**：th08 的补丁偏移**不是相位顺序**。看 ST1 的原始调用（`thprac_th08.cpp:1710-1731`）：
+
+```cpp
+case TH08_ST1_BOSS2: ECLWarp(4175, 0xac84, 0, -1); ECLSetTime(ecl, 0x3d30, 0, 38, 60); break;
+case TH08_ST1_BOSS3: ECLWarp(4175, 0xac84, 0, -1); ECLTimeFix(0x3c68, 0, 6);
+                     ECLJump(ecl, 0x3d08, 0x4e0c, 0, 30);                              break;
+case TH08_ST1_BOSS4: ECLWarp(4175, 0xac84, 0, -1); ECLTimeFix(0x3c68, 0, 6);
+                     ECLCallSub(ecl, 0x3d08, 33, 60); ECLTimeFix(0x4ed4, 0, 2);
+                     ECLSetTime(ecl, 0x4ef0, 0, 44);                                    break;
+```
+
+- `BOSS2` 的补丁点在 `0x3d30`，`BOSS3/BOSS4` 在 `0x3d08`（**更靠前**）⇒ 按 offset 升序会把 BOSS2 排到 BOSS3 之后，**规则失效**。
+- 而且 `BOSS3` 是 **jump 到 `0x4e0c`**、`BOSS4` 是 **call 到 sub 33** ⇒ 相位的真实入口是**跳转目标/setTime 后的 (sub,time)**，不是补丁点本身。
+
+**正确的二级签名（推荐）＝ `(sub_id, 脚本时间)`**：
+
+```cpp
+// 宿主数组：OBJ(i) = 0x577F20 + 0x53D0 + i*0x53D0，i = 0..479
+// 取「当前 cursor」：cursor = *(uint32_t*)(host + 0x2CA0)（通常 = host + 0x7F8）
+uint32_t cursor = *(uint32_t*)(host + 0x2CA0);
+uint32_t ip     = *(uint32_t*)(cursor);         // 当前指令绝对地址
+int32_t  t      = *(int32_t*)(cursor + 0x0C);   // 脚本当前时间
+int16_t  subId  = *(int16_t*)(cursor + 0x224);  // 当前 sub_id
+int16_t  depth  = *(int16_t*)(host + 0x2CEA);   // 调用深度（≤16）
+uint32_t off    = ip - pECL;                    // 与 CSV 同坐标系（但属于 boss 脚本，通常 ≠ 车道 offset）
+```
+
+**签名从源码推导的规则**（写进生成脚本，不要手抄）：
+
+| thprac 调用 | 语义 | 相位签名 |
+| --- | --- | --- |
+| `ECLJump(ecl, off, dest, time, ecl_time)` | 在 `off` 处（脚本时间 `ecl_time`）跳到 `dest` | 入口 = **`dest`**，且 `t ≥ ecl_time` |
+| `ECLCallSub(ecl, off, sub, time, ecl_time)` | 在 `off` 处 call sub | 入口 = **`sub`**（`depth` 变大），`t ≥ ecl_time` |
+| `ECLSetTime(ecl, off, time, sub, ecl_time)` | 在 `off` 处（脚本时间 `ecl_time`）把 `sub` 的时间置 `time` | 匹配键 = **`(off, ecl_time)`**（命中后 `sub` 从 `time` 起跑） |
+| `ECLTimeFix(off, time, count)` | 只改时间、不改入口 | **不产生签名**（仅辅助） |
+
+**ST1 的推导结果（示例，待真机校准）**：
+
+| 记录名 | 一级 `(time, offset)` | 二级签名（推导） |
+| --- | --- | --- |
+| ST1 BOSS1 | 4175/0xAC84 | 无补丁 ⇒ 容器默认入口（`0xAC84` 之后的首个自然相位） |
+| ST1 BOSS2 | 4175/0xAC84 | 在 **`0x3D30`** 处（`t=60`）把 sub 38 的时间置 0 ⇒ 匹配键「`off≈0x3D30 ∧ t≥60`」 |
+| ST1 BOSS3 | 4175/0xAC84 | 跳到 **`0x4E0C`**，进入条件 `t ≥ 30` |
+| ST1 BOSS4 | 4175/0xAC84 | **sub 33**（call），进入条件 `t ≥ 60` |
+| ST1 LS | 4176/0xACD0 | 一级唯一，无需二级 |
+
+> ⚠️ 上表是**从补丁调用静态推导**的，**未经真机确认**「正常游玩时 boss 脚本确实按这些入口推进」。th08 的 `THPatch` 有的**改写控制流**（jump/call），这类补丁在正常游玩时并不存在 ⇒ **正常游玩的真实相位边界必须真机采样**（见 §9.7）。
+
+### 9.5 宿主是哪一槽（th08 特有未决项）
+
+`ECL 资源`是静态单例，但**宿主对象**是 480 槽数组（`0x57D2F0 + i*0x53D0`），**「主线是哪一槽」静态未定案**（逆向报告 §5.3）。二级判定必须自己挑宿主：
+
+1. 遍历 480 槽，跳过 `*(u32*)(host+0x2CA0) == 0` 的；
+2. 对每个宿主算 `cursor`/`subId`/`ip`；
+3. 只保留 `subId` 落在「本 boss 家族的 sub 集合」内的宿主；
+4. 若仍多于 1 个 ⇒ 取 `depth == 0` 且 `t` 最大的那个；否则 no-op。
+5. **不要缓存宿主指针**（th15 曾因缓存指针崩过，见 `logger_progress.md` §4 第 8 条）——每帧重扫。
+
+### 9.6 边界与已知不可解
+
+1. **`depth > 0`**：`cursor` 已切到被调 sub，`subId` 变成本 sub ⇒ 用 `(subId, t)` 匹配仍成立（call 本身就是签名）。
+2. **相邻相位签名完全相同**：如 `ST5 BOSS1..7`、`ST6A/B BOSS1..9`（各级一级键相同、`THPatch` 目标 sub 也相同）⇒ 只能靠 `t` 区间 + 补丁偏移的组合；若仍不可分，按**先命中**并记日志。2026-10-22 裁决：接受该实现层限制，不造伪副键。
+3. **`LW 1..17`**：不在白名单（用户决定无监控意义），二级不涉及。
+4. **车道被消费后**：`ECLWarp` 写入的 slot 在执行后可能被清空/改写 ⇒ 一级不能假设「车道一直保持 warp 值」。缓解：一级命中后**锁存**当前 boss 家族，直到 `slotCount==0` 或换关/新局才释放。（🟡 需真机确认车道在 boss 战期间的值。）
+5. **暂停 / replay / attract**：`*mStage`、`slotCount`、宿主数组都可能被重置 ⇒ 统一 `Reset()`。
+6. **中boss 与关底并存**：一级家族不同（MID vs BOSS），按 `subId` 集合区分。
+
+### 9.7 实现前必须先补的三件事（E5 的第 0 步）
+
+1. **生成「相位签名表」**：扩展 `docs/logger/tools/gen_th08_checkpoints.py`，解析 `THPatch` 里每个 section 的 `ECLJump`/`ECLCallSub`/`ECLSetTime`，按 §9.4 的表产出 `{section → (sub, t0) 或 dest}`，嵌入 `thprac_th08_checkpoints_gen.cpp`。**人工抄表不可接受**。
+2. **真机采样「正常游玩」的相位边界**：对每个 boss 家族，边打边打印 `(subId, t, off)`，得到真实的 `(sub,t)` 跳变点；用它**替换/校准** §9.7-1 生成的表。这是本节最大的不确定项。
+3. **定案「主线宿主」**：打印 480 槽中被激活的宿主及其 `subId`，确认 §9.5 的挑法（尤其 boss 战期间是否只有 1 个激活槽）。
+
+### 9.8 真机验证清单（🟡 全部未做）
+
+- [ ] 进每个 boss，打印车道 `(t, off)`，确认一级命中与 CSV 一致；车道在 boss 战期间是否保持/被清。
+- [ ] 每个 boss 家族至少验一组四相位（ST1 BOSS1..4、ST4A/B BOSS1..9、ST6A/B BOSS1..9、ST7 END_*）。
+- [ ] 验证「打掉相位后 `(subId, t)` 的跳变点」是否与 §9.4 推导一致；不一致则以真机为准并回填本节。
+- [ ] 验证挑宿主规则（480 槽 → 1 个），以及 `depth>0` 时的 `subId` 行为。
+- [ ] 练习 warp 与正常游玩两条路径分别验证（前者有补丁、后者没有）。
+- [ ] 暂停 / replay / 重开 / attract 的复位。
+
+## 10. 与其它文档的关系
 
 - **口径 / Q9** → `docs/logger/logger_re_disasm_overview.md` §6 Q9。
 - **回填流程（通用）** → `docs/logger/checkpoint_entry_backfill_workflow.md`；**A 代差异**（第 1 列表头、时间值/偏移记法）→ `docs/logger/checkpoint_csv_workflow.md` §2 / §9。
@@ -480,9 +602,10 @@ PASS：158 行 = 章节 37 + boss 121；已填 141（章节 37 + boss 104）；1
 
 ---
 
-## 10. 变更记录
+## 11. 变更记录
 
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-22 | 建档并回填 `docs/logger/th08_checkpoints.csv` 第 1 列（`时间轴位置`）：**141/158** = 章节 37/37 + boss 104/121；`LW 1..17` 共 17 行**按用户 2026-10-22 决定有意留空**（源码为空 case `:2748–2765`，不反推 ECL）。取值 = `ECLWarp` 第 1 个 pair，dlg/非 dlg 双值取非 dlg（9 行）。新建本文件与 `docs/logger/tools/verify_th08_entries.py`。**`.ecl` 复算 141/141 命中**，全部落在时间轴车道命令区（lane）⇒ 登记 D1（附录 A.1 `st9` 标签错，实为 ST7 Extra）、D2（§9.2 cursor ip 匹配不可行，应读 Timeline 车道）、D3（39 行命令 time ≠ CSV time，多为 +60）、D4（141 个数值无抄错）。**未改** `th07`、`logger_progress.md`、`th08_ecl_re_report.md`。**全部 🟡 静态定案、未真机。** |
 | 2026-10-22 | **用户裁决落地**：① 读取面改为 **Timeline 车道**（`slot+8`/`slot+0xC`），原 §9.2 的「宿主 cursor 精确匹配」作废；② 匹配键定为 **offset 单键**（`time` 仅作可读性）；③ 同值分节接受为实现层限制、不造伪副键；④ `LW 1..17` 按用户决定留空、不算缺口。§8 由「仍需裁决」改写为「裁决结果与未做项」。**未改 `th08_ecl_re_report.md`**（§9.2/§0/附录 A.1 的订正由主代理统一收口）。 |
+| 2026-10-22 | **新增「监控两级判定流程」节（E5 实现口径，🟡 未真机）**：说明 boss 段时间值必然重复（th07 140 行/53 个值、th08 141 行/67 个值），一级键只定「boss 容器」，相位须二级读 boss 脚本位置；给出完整读取链、签名/区间推导规则、伪代码、宿主挑法与边界，以及实现前必须先做的生成脚本与真机采样项。**CSV 未改**。 |
