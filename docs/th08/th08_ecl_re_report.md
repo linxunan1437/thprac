@@ -4,8 +4,8 @@
 > 二进制：`../exes/th08.exe`，**840704 B**，PE `TimeDateStamp = 1095610188`，`ImageBase = 0x400000`，`RELOCS_STRIPPED`（⇒ **RVA = VA − 0x400000**），`SizeOfImage = 0x14DC000`，`SizeOfCode = 0xB1C00`。
 > `sha256 = 330fbdbf58a710829d65277b4f312cfbb38d5448b3df523e79350b879213d924`（与 `docs/logger/decompile_materials.md` §2 的 `330fbdbf…` 一致；对应 `[th08] 东方永夜抄 (日文版)`）。
 > 节表（本机实测，**注意 `.text` 的 RVA 不是 0**）：`.text` VA `0x402000` / RVA `0x2000` / RawPtr `0x1E00` / RawSize `0xB1C00`；`.rdata` VA `0x4B4000` / RawSize `0x11400`；`.data` VA `0x4C6000` / **VirtualSize `0x1413840`（巨型 BSS，本文的静态全局都在这里面）**；`.data1` VA `0x18DA000`；`.rsrc` VA `0x18DB000`。**VA→文件偏移必须用 `pefile.get_offset_from_rva(VA−0x400000)`**。
-> 引擎代：**A 代（第一代引擎）**；同代参照：th06（无 exe）/ th07。
-> ECL / decl 素材：**无**（无 `.ecl`、无 `.decl`、无 A 代 eclmap）。`../exes/th08.dat` 内的 ECL 成员名可从 exe 字符串读出（见 §Q2），但**未解包**。
+> 引擎代：**A 代（第一代引擎）**；同代参照：th06（E1 见 `docs/th06/th06_ecl_re_report.md`）/ th07。
+> ECL / decl 素材：**本报告撰写时无**；**2026-10-21 已补齐**（`../exes/ecl/th08/ecldata*.ecl` 24 份 + `../exes/ecl_dump/th08/*.decl`，`thecl -d8 -m ECL_MAP_08.txt`）—— **本报告结论未据此复核**（补齐的是**离线具名**能力）。A 代仍无 eclmap（th08 借用 `ECL_MAP_08.txt`）。
 > 方法：`pefile 2024.8.26` + `capstone 5.0.7` **只读静态反汇编**（脚本见「工具与复现」），用「原始字节搜索 + 函数入口整段反汇编 + 跳表/字段位移交叉印证」定位。
 > 状态：**静态定案（🟡 已定案、未真机三态）**。本机为 macOS，**无法编译、无法真机运行，未做任何真机验证**。
 > 地址口径：正文以 **VA** 为主，并标注 **RVA = VA − 0x400000**。
@@ -25,7 +25,7 @@
 | **Q6 名字来源** | ✅ **运行期不保留 sub 名** | ECL 文件头只有**偏移表**（`buf+0x48`，`count = *(i16*)(buf+4)`）；加载器 `0x418330` 全文无名字解析；exe 内除文件名字符串外**无任何 sub 名串**。⇒ 只能离线做「偏移 ↔ 段落」映射（用 thprac 自己的 warp 表，见 §附录）。 |
 | **Q7 机体 / 子机** | ✅ 地址有效（thprac 既有） | `SHOTTYPE_ADDR = 0x164D0B1`（**byte**，作表索引）；`DIFF_ADDR = 0x160F538`（int，`GameManager+0x30`，`imul …,0x44` 作行距）；**新登记**：`0x160F53C` = **rankMask**（`GameManager+0x34`，解释器与 slot 处理器都用它判难度）、`0x164D0B8`（**i16**，关卡/END 选择子，`≥0xCD` = Extra）。组合编码语义待真机。 |
 | **Q8 练习跳转影响** | 🟡 **等价物是「写哪就读哪」**，但两条路时间尺度不同 | `ECLJump/ECLCallSub/ECLSetTime/ECLTimeFix` **直接改写运行期 ECL 缓冲**（`ECLHelper` 基址 = `*(u32*)0x4ECCB8`）⇒ 下一帧该宿主执行即读到；`ECLWarp` 写 **Timeline slot**（time/ins），由 stage update 每帧扫描、`slot+8 == ins->time` 时执行 slot 命令 ⇒ **下一个 stage-update 帧生效**。 |
-| **Q9 段落判定口径** | ✅ 沿用**路过式 checkpoint（latch）**；A 代读取方案见下 | **读 `(cur_sub, offset)`**（`offset` 优先，因为 warp 落点是精确偏移）；**checkpoint「入口」列记 `(time, offset)`**（不用 sub 名）。数组匹配 = 偏移**精确相等 / 区间**。`main` 兜底值。 |
+| **Q9 段落判定口径** | ✅ 沿用**路过式 checkpoint（latch）**；A 代读取方案见 §9.2 | **读 Timeline 车道**（`slot+8`=time、`slot+0xC`=命令指针）—— 2026-10-22 订正：141 个 warp offset **全在车道命令区**、与 sub 指令链交集为空，原「读宿主 cursor「`cur_ins−pECL`」方案作废；**checkpoint「入口」列记 `(time, offset)`**，匹配用 **offset 单键**（`time` 仅作可读性）。`main` 兜底值。 |
 
 > **关键地址（VA / RVA）**
 > **ECL 资源单例** `0x4ECCB8` / `0xECCB8`（`+0`=ECL 文件缓冲、`+4`=sub 偏移表＝`buf+0x48`）；
@@ -572,22 +572,22 @@ int16_t  esub   = *(int16_t*)(cursor + 0x224);       // 当前 sub_id
 - ③ 的 cursor 读法与 ② 的 slot 写法是**两个不同对象**；`ECLWarp` 先把 slot 写进去，再由 slot 命令**派生新脚本对象**（`0x42A4E0`）→ 因此「读哪个宿主」必须先确定（§5.3）。
 - 采样应落在**帧间稳定态**（IGI 渲染），避开「slot 已写、脚本尚未执行」的一帧。
 
-### 9.2 Q9：判定口径（**A 代可落地建议**）
+### 9.2 Q9：判定口径（**A 代可落地建议**，2026-10-22 按实测订正）
 
 **口径不变**：**路过式 checkpoint（latch）** —— 经过白名单条目即置「当前段落」，不在表内 **no-op**（不回退 `main`），本局首次命中前显示 `main`。
 
-**A 代读取方案（本作建议，🟡 未真机）**：
+**读取面订正（重要）**：2026-10-22 用 `.ecl` 对 141 个 `ECLWarp` 落点做了全量复算 —— **141/141 都落在「时间轴车道命令区」**（`pECL+8` 起的 slot 初始命令链，引擎 `0x42AD3D` 按 `u8 size @+6` 串链），**没有一个落在 sub 的指令链内**（9 关逐一求交 = ∅）。因此原稿「读宿主 cursor 的 `cur_ins − pECL` 与 warp offset 精确相等匹配」**静态上 0 命中**，**作废**。
 
-1. **读哪个字段**（先 `cursor = *(u32*)(host+0x2CA0)`，通常 = `host+0x7F8`）：
-   - **主键 = 指令偏移** `offset = *(u32*)(cursor) − *(u32*)0x4ECCB8`。理由：`ECLWarp` 的落点就是「`pECL + offset`」的**精确字节偏移**，与运行期 `cur_ins − pECL` 同坐标系、可**精确相等**匹配（不需要区间表）。
-   - **辅键 = 时间值** `*(i32*)(cursor+0x0C)`（常用于分支/对话差异导致的同级不同落点消歧，以及日志可读性）。
-   - **辅键 = sub_id** `*(i16*)(cursor+0x224)`（若真机发现「段落入口恰好是一个独立 sub 起点」，可用它做廉价预筛）。
-2. **哪个 slot**：**不看 Timeline slot**。Timeline 是「写入侧的定时跳转队列」，它的 (time, ins) 是**段落入口的坐标**，不是「当前位置」。当前位置一律从**宿主的 cursor 帧**读。
-3. **checkpoint「入口」列记什么**：**记 `(time, offset)`**（= thprac 该段落 `ECLWarp` 的第一个 pair），**不记 sub 名**（本作无 sub 名）。建议 CSV「入口」列写成 `时间值/偏移`（例 `340/0x9C38`），与 th10–18 的「sub 名」口径显式分叉。
-4. **匹配规则**：`offset` 精确相等优先；若某段落入口落在**容器内部**（`main` 型超长脚本）导致 `offset` 会先经过若干无关指令，再退化到「区间 + 时间上限」二级匹配（参考 th10 的 `sub名+0x偏移` 思路）。
-5. **多 lane**：`ECLWarp` 一次最多写 4 个 slot（`_requests` §1）。**第 1 个 pair = 该段落主线入口**；第 2–4 个 pair 是辅助 lane（背景/符卡/演出脚本），**不要登记为 checkpoint**（候选，见附录 §A.2 注）。
+**A 代读取方案（订正后）**：
 
----
+1. **读哪个结构**：**Timeline 车道** —— `TL = 0xF54CF0`（`0x577F20 + 0x9DCDD0`），`slot[i] = TL + i*0x10`，`slotCount = *(i16*)(pECL+6)`；
+   - `slot+0x08` = i32 **time**（`ECLWarp` 的 `time1`）；
+   - `slot+0x0C` = u32 **命令指针**（`ECLWarp` 的 `offset1` 落点，`pECL + offset`）。
+   `ECLWarp` 写的正是这两个字段，所以 CSV 的 `(time, offset)` 与车道字段**一一对应**。
+2. **匹配键 = `offset` 单键**：`cur_off = *(u32*)(slot+0xC) − pECL`，与白名单 offset 精确相等即命中；**`time` 不参与相等判定** —— 实测 CSV 的 time 是 warp 入参（目标时间），**不是**落点命令自身的 time：章节 35 行差 +60（`slot+8` 先扫描到 `ins->time` 后才执行）、`ST7 后半 #3` 差 +90、`ST4B 前半 #1` 差 −339（offset 恰是 `slot0` 初始命令 t=1）、`ST4A LS`/`ST4B LS` 差 +1。`time` 仅作**日志可读性 / 辅助校验**。
+3. **checkpoint「入口」列**：记 `(time, offset)`（＝该段落 `ECLWarp` 的第一个 pair）；第 2–4 个 pair 是辅助 lane，**不登记**。
+4. **主 lane**：`ECLWarp` 最多写 4 个 slot；主线是**第 1 个 pair 写入的那条**（thprac 固定从 `slot0` 起写）。哪条 slot 承载主线段落在真机上确认（🟡）。
+5. **同值分节（2026-10-22 补：两级判定）**：一级键（车道 `(time,offset)`）在 boss 段大量重复（CSV 141 行只有 67 个不同值，17 组覆盖 91 行；如 `ST1 BOSS1..4` 同为 `4175/0xAC84`）⇒ **必须两级**：一级定「boss 容器」，二级读 **boss 宿主 cursor 的 `(sub_id, 脚本时间)`**（`cursor+0x224` / `cursor+0xC`）按相位签名匹配。**注意 th08 不能用 th07 的「按补丁 offset 升序切区间」** —— th08 的补丁偏移不按相位单调（`ST1 BOSS2` 在 `0x3d30`，而 `BOSS3/BOSS4` 在更靠前的 `0x3d08`，且分别 jump 到 `0x4E0C` / call sub 33）。完整口径（签名推导规则、挑宿主、边界、验证清单）见 **`docs/th08/th08_checkpoint_entry_report.md` §9**。
 
 ## 附录 A —— 候选段落入口值表（候选、**未真机**）
 
@@ -597,24 +597,26 @@ int16_t  esub   = *(int16_t*)(cursor + 0x224);       // 当前 sub_id
 
 ### A.1 `THStageWarp`（道中，section 10000+stage*100+portion）
 
+> ⚠️ **标签订正（2026-10-22）**：本表的 `stN` 是 `THStageWarp` 的 **`stage` 实参**（= `mStage+1`），**不是「所属关卡」**。映射：`st1..st3`→`ST1..ST3`、`st4`→`ST4A`、`st5`→`ST4B`、`st6`→`ST5`、`st7`→`ST6A`、`st8`→`ST6B`、`st9`→**`ST7`(Extra)**。原表把 `st9` 写成「LW?」是**错的** —— LW 在 `THStageWarp`/`THPatch` 里没有 chapter case（`thprac_th08.cpp:2748-2765` 是 17 个空 `break`）。数值本身与源码逐项相等，未发现抄错。
+
 | 关卡 | portion | time | offset | 其余 pair（辅助 lane） |
 | --- | --- | --- | --- | --- |
-| st1 | 1 | 340 | `0x9C38` | (20, `0xAD18`) |
-| st1 | 2 | 2875 | `0xABA4` | (20, `0xAD18`) |
-| st2 | 1..4 | 400 / 990 / 2350 / 3350 | `0xA194` / `0xA8D8` / `0xB418` / `0xBA78` | 各 (20, `0xC0CC`) |
-| st3 | 1 | 340 | `0xB258` | (20,`0xB91C`) (20,`0xBB74`) (20,`0xC0AC`) |
-| st3 | 2 | 1220 | `0xB368` | (200,`0xBA14`) (20,`0xBB74`) (20,`0xC0AC`) |
-| st3 | 3 | 3103 | `0xB664` | (380,`0xBACC`) (20,`0xBB74`) (160,`0xC304`) |
-| st4 | 1..4 | 340 / 1180 / 2240 / 3180 | `0xA2D4` / `0xA834` / `0xA8AC` / `0xABCC` | p1/p2 (20,`0xBAFC`)；p3/p4 (360,`0xBED4`) |
-| st4 | 5 | 4962（dlg）/ 4903 | `0xB280` / `0xB2D8` | (360, `0xBED4`) |
-| st4 | 6 | 5363 | `0xB598` | (360, `0xBED4`) |
-| st5 | 1..4 | 340 / 1180 / 2240 / 3180 | `0xC538` / `0xCAB8` / `0xCB30` / `0xCE50` | p1/p2 (20,`0xDD80`)；p3/p4 (360,`0xE158`) |
-| st5 | 5 | 4962（dlg）/ 4903 | `0xD504` / `0xD55C` | (360, `0xE158`) |
-| st5 | 6 | 5363 | `0xD81C` | (360, `0xE158`) |
-| st6 | 1..5 | 200 / 1040 / 2990 / 4651 / 5971 | `0xA674` / `0xA694` / `0xAFDC` / `0xB0E8` / `0xB648` | — |
-| st7 | 1,2 | 200 / 1140 | `0xC6F4` / `0xC714` | — |
-| st8 | 1,2 | 200 / 1140 | `0x10324` / `0x10364` | — |
-| st9（LW?） | 1..7 | 340 / 1010 / 2900 / 5237 / 5947 / 6757 / 8337 | `0x12544` / `0x127A8` / `0x12B6C` / `0x132B8` / `0x136B4` / `0x13774` / `0x151F4` | p1 (20,`0x1535C`)；p2 (210,`0x155C0`)；p3 (390,`0x15824`)；p4 (810,`0x15D60`)；p5–p7 (20,`0x1535C`) |
+| ST1 | 1 | 340 | `0x9C38` | (20, `0xAD18`) |
+| ST1 | 2 | 2875 | `0xABA4` | (20, `0xAD18`) |
+| ST2 | 1..4 | 400 / 990 / 2350 / 3350 | `0xA194` / `0xA8D8` / `0xB418` / `0xBA78` | 各 (20, `0xC0CC`) |
+| ST3 | 1 | 340 | `0xB258` | (20,`0xB91C`) (20,`0xBB74`) (20,`0xC0AC`) |
+| ST3 | 2 | 1220 | `0xB368` | (200,`0xBA14`) (20,`0xBB74`) (20,`0xC0AC`) |
+| ST3 | 3 | 3103 | `0xB664` | (380,`0xBACC`) (20,`0xBB74`) (160,`0xC304`) |
+| ST4A | 1..4 | 340 / 1180 / 2240 / 3180 | `0xA2D4` / `0xA834` / `0xA8AC` / `0xABCC` | p1/p2 (20,`0xBAFC`)；p3/p4 (360,`0xBED4`) |
+| ST4A | 5 | 4962（dlg）/ 4903 | `0xB280` / `0xB2D8` | (360, `0xBED4`) |
+| ST4A | 6 | 5363 | `0xB598` | (360, `0xBED4`) |
+| ST4B | 1..4 | 340 / 1180 / 2240 / 3180 | `0xC538` / `0xCAB8` / `0xCB30` / `0xCE50` | p1/p2 (20,`0xDD80`)；p3/p4 (360,`0xE158`) |
+| ST4B | 5 | 4962（dlg）/ 4903 | `0xD504` / `0xD55C` | (360, `0xE158`) |
+| ST4B | 6 | 5363 | `0xD81C` | (360, `0xE158`) |
+| ST5 | 1..5 | 200 / 1040 / 2990 / 4651 / 5971 | `0xA674` / `0xA694` / `0xAFDC` / `0xB0E8` / `0xB648` | — |
+| ST6A | 1,2 | 200 / 1140 | `0xC6F4` / `0xC714` | — |
+| ST6B | 1,2 | 200 / 1140 | `0x10324` / `0x10364` | — |
+| ST7（Extra） | 1..7 | 340 / 1010 / 2900 / 5237 / 5947 / 6757 / 8337 | `0x12544` / `0x127A8` / `0x12B6C` / `0x132B8` / `0x136B4` / `0x13774` / `0x151F4` | p1 (20,`0x1535C`)；p2 (210,`0x155C0`)；p3 (390,`0x15824`)；p4 (810,`0x15D60`)；p5–p7 (20,`0x1535C`) |
 
 ### A.2 `THPatch`（boss / 中boss section，按枚举顺序 `THPrac::TH08::TH08_ST*`）
 
@@ -701,3 +703,6 @@ STDStage4Fix(): std[0xED8]=1, std[0xF14]=1（+ 末符卡时 0x1394/0xF48 各写�
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-19 | 建档（本报告，E1）。静态定案 th08 的 Q1–Q9。**Q1**：th08「当前执行到哪」= **指令指针为主**、并存 sub_id 与时间值 —— `cur_ins = *(u32*)(host+0x7F8)`（cursor[0]）、`cur_time = *(i32*)(host+0x804)`（cursor+0xC）、`cur_sub = *(i16*)(host+0xA1C)`（cursor+0x224）；`offset = cur_ins − *(u32*)0x4ECCB8`。**Q2**：`ECLSRC = 0x4ECCB8`（静态单例，`+0`=pECL、`+4`=sub 表=pECL+0x48）；`sub_start(id) = *(u32*)(*(u32*)(0x4ECCB8+4)+id*4)`；ECL 文件头 = `{u32 magic 0x800; i16 subCount@+4; i16 slotCount@+6; u32[16]@+8; u32[subCount]@+0x48}`（加载器 `0x418330` 把偏移改成绝对）；`call sub`=opcode 0x34→`0x421BD0`→`0x418450`；**Timeline 与 sub 无关**（slot `+0xC` 是指令指针，走 17 项表 `0x42AD60`）。**Q3**：显式调用栈（基址 `host+0xA20`、帧长 `0x228`、深度 `*(i16*)(host+0x2CEA)` ≤16、帧 `+0x224`=该层 sub_id）。**Q4**：**A 代无「具名 main 宿主」**；ECL 资源静态单例、宿主为静态 manager `0x577F20` 内嵌数组（`0x57D2F0`、步长 `0x53D0`、480 槽）；捕获点 `0x418450`（3B，`host=[ebp+8]−0x7F8`）或 `0x4184C8`（3B，`[ebp+8]`=host）；**「主线是哪一槽」未定案（🟡 缺口）**。**Q5**：ECL 主解释器 `FUN_004184B0`（`0x4184B0`–`0x41ECBD`），opcode 跳表 `0x41ECBE`（0xB8 项），`[ebp+8]`=host、`[ebp−0xC]`=当前指令；thprac 现有 4 hook 的裁定：`0x41CB32`/`0x41C44F` 可用但非无条件每帧、**`0x42F34D` 与当前位置无关（thprac 注释误读）**、`0x437AF3` 非每帧。**Q6**：**运行期不保留 sub 名**（加载器无名字解析、exe 无 sub 名串）⇒ 只能离线「偏移↔段落」映射，且本作无 `.ecl` ⇒ **可行资产 = thprac 自己的 `ECLWarp` 表**。**Q7**：`0x164D0B1`(u8 shottype)、`0x160F538`(i32 diff=GameManager+0x30)、新登记 `0x160F53C`(rankMask=GameManager+0x34)、`0x164D0B8`(i16 关卡/END 选择)、`0x164D2CC`(ECL 文件索引)；「机体×子机（4 组合×2 队）」第二维编码**未定案（🟡）**。**Q8**：`ECLJump/ECLCallSub/ECLSetTime/ECLTimeFix` 直接改写运行期缓冲（下一帧即读到）；`ECLWarp` 写 Timeline slot（下一个 stage-update 帧由 `0x42C7D5` 扫描 → `0x42A8A0` 执行）。**Q9**：沿用 latch；**A 代读取方案 = 以 `offset` 为主键、`time` 为辅键**，checkpoint「入口」列记 **`(time, offset)`（非 sub 名）**，`ECLWarp` 只取第 1 个 pair。**附录 A** 抽出 `THStageWarp`/`THPatch` 全部候选 `(time, offset)` 表（`LW_1..17` 为空 case）。**补记**：① 「当前位置」的权威写法 = 先 `cursor = *(u32*)(host+0x2CA0)`，再读 `*(u32*)(cursor)`/`cursor+0xC`/`cursor+0x224`（`host+0x7F8` 只是主 cursor 的默认值）；② 新发现 **`host+0x3384` = 子上下文对象指针数组**（子上下文 cursor@+8、栈@+0x230，`0x41EC2E` 类路径会切换过去）⇒ 单宿主内可并行多个 cursor（🟡 元素数未定案）。证据：`capstone` 只读反汇编（脚本 `th08work/x*.py`）+ 全文立即数/`E8 rel32`/跳表扫描。**未真机三态；无 `.ecl` 素材，未做离线脚本核对（🟡）**。 |
+| 2026-10-22 | **素材状态订正（不改结论）**：头部「ECL / decl 素材：无」改为「本报告撰写时无；2026-10-21 已补齐 `../exes/ecl/th08/ecldata*.ecl`（24）+ `../exes/ecl_dump/th08/*.decl`（`thecl -d8 -m ECL_MAP_08.txt`），**本报告结论未据此复核**」；「同代参照：th06（无 exe）」改为「th06（E1 见 `docs/th06/th06_ecl_re_report.md`）」。**地址与结论一字未改。** |
+| 2026-10-22 | **E3/E4 回填 + 读取面订正**（地址/结论数值未改）。CSV 第 1 列回填 **141/158**（章节 37 + boss 104；`LW 1..17` 按用户决定留空、不算缺口）。**§9.2 重写**：141 个 warp offset 全量复算后**全部落在时间轴车道命令区**、与 sub 指令链交集为空（9 关逐一 = ∅）⇒ 原「读宿主 cursor `cur_ins−pECL` 精确匹配」**作废**，改读 **Timeline 车道**（`slot+8`=time、`slot+0xC`=命令指针）；匹配键定为 **offset 单键**，`time` 仅作可读性（实测 39 行 time 与落点命令 t 不等：章节 +60/+90/−339、LS +1）。**§0 Q9 行同步**。**附录 A.1 标签订正**：`stN` 是 `THStageWarp` 的 `stage` 实参，`st4..st9`＝`ST4A/ST4B/ST5/ST6A/ST6B/ST7(Extra)`，原「`st9`（LW?）」错误（LW 无 chapter case）。逐行权威表见 `docs/th08/th08_checkpoint_entry_report.md`。**未真机（🟡）。** |
+| 2026-10-22 | **补「两级判定」交叉引用**：§9.2 第 5 条重写 —— 一级键（车道 `(time,offset)`）在 boss 段大量重复（141 行 67 个不同值），须二级读 boss 宿主 cursor 的 `(sub_id, 脚本时间)`；并明确 **th08 不能用「补丁 offset 升序切区间」**（偏移不按相位单调，`ST1 BOSS2`@`0x3d30` 晚于 `BOSS3/BOSS4`@`0x3d08`，且分别为 jump `0x4E0C` / call sub 33）。完整口径见 `docs/th08/th08_checkpoint_entry_report.md` §9。**结论/地址未改；🟡 未真机。** |
