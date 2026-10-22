@@ -133,11 +133,15 @@
     <ClCompile Include="src\thprac\thprac_th09.cpp" />
     <ClCompile Include="src\thprac\thprac_th095.cpp" />
     <ClCompile Include="src\thprac\thprac_th10.cpp" />
+    <ClCompile Include="src\thprac\thprac_th10_checkpoints_gen.cpp" />
     <ClCompile Include="src\thprac\thprac_th11.cpp" />
+    <ClCompile Include="src\thprac\thprac_th11_checkpoints_gen.cpp" />
     <ClCompile Include="src\thprac\thprac_th12.cpp" />
+    <ClCompile Include="src\thprac\thprac_th12_checkpoints_gen.cpp" />
     <ClCompile Include="src\thprac\thprac_th125.cpp" />
     <ClCompile Include="src\thprac\thprac_th128.cpp" />
     <ClCompile Include="src\thprac\thprac_th13.cpp" />
+    <ClCompile Include="src\thprac\thprac_th13_checkpoints_gen.cpp" />
     <ClCompile Include="src\thprac\thprac_th14.cpp" />
     <ClCompile Include="src\thprac\thprac_th14_checkpoints_gen.cpp" />
     <ClCompile Include="src\thprac\thprac_th143.cpp" />
