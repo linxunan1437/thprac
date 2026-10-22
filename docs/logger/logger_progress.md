@@ -2,7 +2,7 @@
 
 > 上位文档：`docs/logger/logger_re_disasm_overview.md`（总括，含术语表 §2、Q1–Q9 §6、锚点总表 §5）。
 > 需求来源：`docs/req_logger.md`。
-> 范围：**监控**（实时显示「当前段落」）与**日志记录**（JSONL 落盘）均已落地 th14–th18（日志见 `docs/logger/logger_impl_report.md`），**五作全部走完、进入待真机测试阶段**（th16 监控已真机验证除完整全关，其余未测）；th10–th13 逆向完成、**白名单已枚举并全表回填**（2026-10-17）；**th06–th08 已 E0 建档**（2026-10-16，A 代口径见 `docs/thXX/thXX_ecl_re_requests.md`），其中 **th07 / th08 于 2026-10-19 完成 E1 逆向**（`docs/th07/th07_ecl_re_report.md`、`docs/th08/th08_ecl_re_report.md`），th06 待做；th09 需求明确不支持、th095 不在范围。
+> 范围：**监控**（实时显示「当前段落」）与**日志记录**（JSONL 落盘）均已落地 th14–th18（日志见 `docs/logger/logger_impl_report.md`），**五作全部走完、进入待真机测试阶段**（th16 监控已真机验证除完整全关，其余未测）；th10–th13 逆向完成、**白名单已枚举并全表回填**（2026-10-17）；**th06–th08 已 E0 建档**（2026-10-16，A 代口径见 `docs/thXX/thXX_ecl_re_requests.md`），其中 **th07 / th08 于 2026-10-19 完成 E1 逆向**（`docs/th07/th07_ecl_re_report.md`、`docs/th08/th08_ecl_re_report.md`）、**th06 于 2026-10-22 完成 E1 逆向**（`docs/th06/th06_ecl_re_report.md`，素材 2026-10-21 补齐）⇒ **A 代 E1 三作齐**；**th07 / th08 于 2026-10-22 完成 E3/E4 回填**（th07 140/140、th08 141/158，`LW` 留空）；th09 需求明确不支持、th095 不在范围。
 > 工作流：`docs/logger/checkpoint_csv_workflow.md`（CSV 骨架）、`docs/logger/checkpoint_entry_backfill_workflow.md`（入口回填）。
 > 素材来源：`docs/logger/decompile_materials.md`。
 > 本机为 **Windows**（VS 在 `D:\tools\VS`），**可编译、可真机运行**——旧描述「macOS 不可编译」已作废，以 `docs/th16/th16_monitor_impl_report.md` 为准。**th16 已完成真机验证**（除完整全关外全部通过）；其余作仍为**静态定案（🟡 未真机三态）**，方法为只读反汇编（`pefile` + `capstone`）+ 离线 ECL 解码。
@@ -37,13 +37,14 @@
 ## 1. 进度总表（结论速览）
 
 > CSV 填/空由 §5 脚本实算（2026-10-16）。`章节行` 记录名形态 = `STn #k` / `STn 前半 #k` / `STn 后半 #k`，其余为 `boss 行`。
-> **th06–th08（A 代）尚未生成 CSV**，不在 §5 统计范围内；其「段落入口」列口径已改为**时间值 / 指令偏移**（非 sub 名，见各作 requests §11）。
+> **A 代 CSV**：**th07 / th08 已于 2026-10-22 回填**（th07 **140/140**、th08 **141/158**，`LW 1..17` 有意留空）；**th06 仍无 CSV**（E2 未生成）。A 代第 1 列口径＝**时间值 / 指令偏移**（非 sub 名）。
+> **A 代 E1 三作齐**（th07/th08 2026-10-19、th06 2026-10-22）；**三作的 `.ecl`/`.decl` 均已于 2026-10-21 补齐**（39/39 dump 成功），故**三作都获得「`SubN` ↔ 文件偏移」的离线映射能力**（仍无 eclmap ⇒ 无指令级语义名）。
 
 | 作 | E0 建档 | E1 逆向报告 | E2 CSV 骨架 | E3 章节行回填 | E4 boss 行回填 | E5 监控实现 | E6 真机 | 日志落盘 | 测试情况 | 综合档位 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **th06** | ✅ | ❌ | ❌ 未生成 | ❌ | ❌ | ❌ 未实现 | ❌ | ➖ | — | A 代建档，**逆向未跑** |
-| **th07** | ✅ | ✅🟡 | ✅ 38+103=141 | ❌ | ❌ | ❌ 未实现 | ❌ | ➖ | — | **E1 逆向完成 + E2 CSV 骨架（2026-10-19）**：当前位置＝**时间轴时间值**（`TL_i+8`＝`*(i32*)0x12FE0FC`，`TL_i=0x9A9B00+0x9545F4+i*0x10`）+ `TL_i+0xC` ip，**无 subIdx**；sub 表 `*(u32*)(0x1347938+4)`（**无名**）；宿主**静态**（无需捕获）；CSV 第 1 列＝**`时间轴位置`**（8 关 ST1–ST8，骨架期空）；**E3/E4 未回填**；监控未实现 |
-| **th08** | ✅ | ✅🟡 | ✅ 37+121=158 | ❌ | ❌ | ❌ 未实现 | ❌ | ➖ | — | **E1 逆向完成 + E2 CSV 骨架（2026-10-19）**：当前位置＝宿主 cursor 的**指令指针**（`cursor=*(u32*)(host+0x2CA0)`；`*cursor`=ip、`+0xC`=time、`+0x224`=sub_id）；运行期**无 sub 名**；CSV 第 1 列＝**`时间轴位置`**（10 关含 ST4A/B、ST6A/B；骨架期空）；**主线宿主是哪一槽仍未定案**；E3/E4 未回填；监控未实现 |
+| **th06** | ✅ | ✅🟡 | ❌ 未生成 | ❌ | ❌ | ❌ 未实现 | ❌ | ➖ | — | **E1 逆向完成（2026-10-22）**：当前位置＝**全局唯一一条时间轴**的「时间值 + 指令指针」（`mgr=0x4B79C8`；`tlTime=*(i32*)(mgr+0xEE5E8)=*(i32*)0x5A5FB0`、`tlInstr=*(u32*)(mgr+0xEE5DC)=0x5A5FA4`）；**无** th07 的多 timeline、**无** th08 的宿主 cursor；敌机侧 `E+0x990`（ip）/`+0x99C`（局部时间）/`+0x9D8`（subId）；宿主**静态**（无需捕获）；**`.ecl`/`.decl` 已备齐** ⇒ `SubN`＝sub 索引 N 可离线映射（th07/th08 做不到）；CSV 第 1 列＝**`时间轴位置`**（时间值）；**E2 未生成**；监控未实现 |
+| **th07** | ✅ | ✅🟡 | ✅ 37+103=140 | ✅ 37/37 | ✅ 103/103 | ❌ 未实现 | ❌ | ➖ | — | **CSV 全表回填（2026-10-22）**：第 1 列＝**十进制时间值**（`ECLTimeWarp` 入参）；当前位置＝**时间轴时间值**（`TL_i+8`＝`*(i32*)0x12FE0FC`，`TL_i=0x9A9B00+0x9545F4+i*0x10`）+ `TL_i+0xC` ip，**无 subIdx**；宿主**静态**（无需捕获）；**删 `ST6 #2`**（与 `ST6 CHAOS` 同为 1180、同一 `ins_0`，用户裁决留 CHAOS）；ST4 三姐妹 BOSS1/BOSS2 共 6 行 ECL 侧不可分（**游戏特性、不算 bug**，logger 层另分）；监控未实现 |
+| **th08** | ✅ | ✅🟡 | ✅ 37+121=158 | ✅ 37/37 | 🟡 104/121 | ❌ 未实现 | ❌ | ➖ | — | **CSV 回填 141/158（2026-10-22）**：第 1 列＝**`时间值/0x偏移`**（`ECLWarp` 第 1 个 pair）；`LW 1..17` 按用户决定**留空、不计缺口**；**读取面订正**：141 个 offset 全在**时间轴车道命令区**、与 sub 指令链交集为空 ⇒ 改读 Timeline 车道（`slot+8`/`slot+0xC`）、**offset 单键**（原「宿主 cursor 精确匹配」作废）；同值分节不可分属实现层限制；监控未实现 |
 | **th10** | ✅ | ✅🟡 | ✅ 41+68=109 | ✅ 41/41 | ✅ 68/68 | ❌ 未实现 | ❌ | ➖ | — | **CSV 全表回填（2026-10-17）**；st1–st3 用 **`sub名+0x偏移`** 二级粒度（`main+0x…`）；boss 行纯离线定出；监控未实现 |
 | **th11** | ✅ | ✅🟡 | ✅ 37+88=125 | ✅ 37/37 | ✅ 88/88 | ❌ 未实现 | ❌ | ➖ | — | **CSV 全表回填（2026-10-17）**；st4 六机体分支 18 行全收录；段入口多为 `async` 派生线程；监控未实现 |
 | **th12** | ✅ | ✅🟡 | ✅ 43+71=114 | ✅ 43/43 | ✅ 71/71 | ❌ 未实现 | ❌ | ➖ | — | **CSV 全表回填（2026-10-17）**；warp 一律走 `ECLJumpEx`；`ST6 BOSS9/10` 已修正为 `BossCard5/6`；监控未实现 |
@@ -69,9 +70,10 @@
 
 ## 2. 分档小结
 
-- **档 A′：A 代建档（th06 / th07 / th08）** —— 2026-10-16 新建 `_ecl_re_requests.md`（三作齐全）。与 B/C 代模板的**主要差异**：章节跳转是「**时间轴**」而非 sub 跳转（th06 `ECLWarp(time)` / th07 `ECLTimeWarp(count,time)` / th08 `ECLWarp(time,offset,…)`，落点分别是 `0x5a5fb0` / `[0x9a9af8+0x9545fc]` / `0xf54cf8`），故 **Q1 改为「sub 索引 / 时间值 / 指令偏移」三选一**；checkpoint「入口」列改用**时间值 / 指令偏移**。**无 CSV**；A 代还**没有 eclmap**、`.ecl` 未从 `.dat` 解出。
-  - **th07 / th08 已于 2026-10-19 完成 E1 逆向**（`docs/th07/th07_ecl_re_report.md`、`docs/th08/th08_ecl_re_report.md`）：**章节定位不读 sub 名，改读「时间轴」** —— **th07**＝`count` 条 timeline（`TL_i=0x9A9B00+0x9545F4+i*0x10`），读 `TL_i+8`（当前时间＝`*(i32*)0x12FE0FC`）/`TL_i+0xC`（ip），宿主**静态**（`0x9A9B00`，**无需捕获**）、**无 subIdx**；**th08**＝主解释器 `0x4184B0` 的 cursor（`*(u32*)(host+0x2CA0)`，通常 `host+0x7F8`：`*cursor`=ip、`+0xC`=time、`+0x224`=sub_id），另有 `ECLWarp` 写的 Timeline slot 数组 `0xF54CF0`。**两作运行期都不保留 sub 名** ⇒ 「记录名」只能来自 thprac 自己的章节表（`th_sections_str` 等），入口列记**时间值 / 指令偏移**。**th06 逆向仍待做**（素材缺口：无 exe/eclmap）。
-  - A 代 ECL 格式里**确实有带 id 的 sub**：th07 `ECLCallSub` opcode `0x29`、th08 opcode `0x34`、th06 有 `EclRawInstrCallArgs.eclSub` 脚手架（未接线）。**Q2 已答（th07/th08）**：两作**都有 sub 表但表项只有指针、无名字**（th07 `*(u32*)(0x1347938+4)`、th08 `*(u32*)(0x4ECCB8+4)`），且**都只是「敌方/被调脚本」层，章节定位仍走时间轴**。
+- **档 A′：A 代建档（th06 / th07 / th08）** —— 2026-10-16 新建 `_ecl_re_requests.md`（三作齐全）。与 B/C 代模板的**主要差异**：章节跳转是「**时间轴**」而非 sub 跳转（th06 `ECLWarp(time)` / th07 `ECLTimeWarp(count,time)` / th08 `ECLWarp(time,offset,…)`，落点分别是 `0x5a5fb0` / `[0x9a9af8+0x9545fc]` / `0xf54cf8`），故 **Q1 改为「sub 索引 / 时间值 / 指令偏移」三选一**；checkpoint「入口」列改用**时间值 / 指令偏移**。**CSV**：th07 / th08 已于 2026-10-22 回填（**140/140**、**141/158**），th06 仍无；A 代**没有 eclmap**（但 **2026-10-21 起三作 `.ecl`/`.decl` 已备齐**，`sub` 级可具名）。
+  - **th07 / th08 已于 2026-10-19 完成 E1 逆向**（`docs/th07/th07_ecl_re_report.md`、`docs/th08/th08_ecl_re_report.md`）：**章节定位不读 sub 名，改读「时间轴」** —— **th07**＝`count` 条 timeline（`TL_i=0x9A9B00+0x9545F4+i*0x10`），读 `TL_i+8`（当前时间＝`*(i32*)0x12FE0FC`）/`TL_i+0xC`（ip），宿主**静态**（`0x9A9B00`，**无需捕获**）、**无 subIdx**；**th08**＝主解释器 `0x4184B0` 的 cursor（`*(u32*)(host+0x2CA0)`，通常 `host+0x7F8`：`*cursor`=ip、`+0xC`=time、`+0x224`=sub_id），另有 `ECLWarp` 写的 Timeline slot 数组 `0xF54CF0`。**两作运行期都不保留 sub 名** ⇒ 「记录名」只能来自 thprac 自己的章节表（`th_sections_str` 等），入口列记**时间值 / 指令偏移**。
+  - **th06 已于 2026-10-22 完成 E1 逆向**（`docs/th06/th06_ecl_re_report.md`）：**「当前位置」＝全局唯一一条时间轴** —— `mgr=ENEMY_MANAGER=0x4B79C8`；**`tlTime=*(i32*)(mgr+0xEE5E8)`（＝`*(i32*)0x5A5FB0`，`ECLWarp` 写点）、`tlInstr=*(u32*)(mgr+0xEE5DC)`（＝`0x5A5FA4`，`tlOff=tlInstr−pCode`）**；时间轴更新 `0x411530`（每帧），时钟 `0x412E07`–`0x412E31`（`ZunTimer::Tick=0x424285`）。**既不是** th07 的 `count` 条 timeline、**也不是** th08 的宿主 cursor；宿主同样**静态**（无需捕获）。**th06 独有优势**：`.ecl`/`.decl` 已备齐 ⇒ **`SubN`＝sub 索引 N 可离线映射**（7/7 文件 `subCount` 与 `decl` 全等、逐 sub 指令数差恒为 1＝末尾 12B 哨兵）；判定主键改「**落点偏移精确相等**」（时间值只作副键），boss 相位用 `bosses[k]` 的 `E+0x9D8`。**交叉印证**：thprac books 常量 `0xCDD4`/`0xCE7C` 与 `ecldata4.ecl` 的时间轴指令边界逐字节对齐。
+  - A 代 ECL 格式里**确实有带 id 的 sub**：th07 `ECLCallSub` opcode `0x29`、th08 opcode `0x34`、th06 `call sub` opcode **`0x23`**（`ret`=`0x24`）。**Q2 已答（三作）**：三作**都有 sub 表但表项只有指针、无名字**（th06 `*(u32*)(0x487E50+4)`、th07 `*(u32*)(0x1347938+4)`、th08 `*(u32*)(0x4ECCB8+4)`），且**都只是「被调脚本」层，章节定位仍走时间轴**。**三作均可离线具名**：`SubN`＝索引 N（`.decl` 已于 2026-10-21 备齐）。
 - **~~档 A：仅建档（th10 / th11 / th12）~~ 已消解（2026-10-16）** —— 三作均已产出 `_ecl_re_report.md` 并回填 requests，**升入档 B**；原「无报告、CSV 全空」描述作废。
 - **~~档 B：逆向完成、白名单未枚举（th10 / th11 / th12 / th13）~~ 已消解（2026-10-17）** —— 四作白名单**已全部枚举并全表回填**（109 / 125 / 114 / 116 = 464 行，全部非空），各作入口表小结见 `docs/thXX/thXX_checkpoint_entry_report.md`。原「白名单未枚举 / CSV 全空 / 未建 boss 报告」描述作废。
   - **B 代 boss 行可纯离线定出（2026-10-17 订正）**：`THPatch` 的字节补丁（改 boss 容器内 `call Boss1` 的**名字串** + 改 `lifeSet` 操作数逼 `setNext` 立即转移）＋ 相位链交叉验证即可逐行定案，**不需要** boss ECL 宿主 / 槽表 / 门控位 —— 那些只在**运行期读当前 sub**（实现监控）时才需要。（此前 §4 第 11 条的「boss 侧前置逆向缺失」判断有误，已撤。）
@@ -89,9 +91,9 @@
 
 | 作 | 报告状态标记 | 已回填范围 | 留空原因 |
 | --- | --- | --- | --- |
-| th06 | E0 建档（无报告） | — | 逆向未跑；A 代无 eclmap、`.ecl` 未从 `.dat` 解出 |
-| th07 | ✅🟡 E1 逆向完成（2026-10-19） | —（CSV 骨架已生成，第 1 列留空） | E3/E4 未回填；入口列口径＝**时间值 / 指令偏移**（无 sub 名可填） |
-| th08 | ✅🟡 E1 逆向完成（2026-10-19） | —（CSV 骨架已生成，第 1 列留空） | E3/E4 未回填；无 sub 名 ⇒ 入口列用 `ECLWarp` 的 `(time,offset)`；**主线宿主是哪一槽未定案** |
+| th06 | ✅🟡 E1 逆向完成（2026-10-22） | —（**无 CSV**，E2 未生成） | E2/E3/E4 未做；入口列口径＝**时间值**（「段落入口」＝`ECLWarp` 入参），另有**落点偏移**可作主键（报告附录 C/D 已给全 40+70 行） |
+| th07 | ✅🟡 静态定案 | 章节 37/37、boss 103/103（全表 140/140） | —（入口列＝十进制时间值；删 `ST6 #2`；详见 `docs/th07/th07_checkpoint_entry_report.md`） |
+| th08 | ✅🟡 静态定案 | 章节 37/37、boss 104/121（全表 141/158） | `LW 1..17` **有意留空**（用户决定，不计缺口）；同值分节不可分属实现层限制；详见 `docs/th08/th08_checkpoint_entry_report.md` |
 | th10 | 🟡 静态定案 | 章节 41/41、boss 68/68（全表 109/109） | —（st1–st3 的 15 行用 `main+0x…` 二级粒度；`ST4 前半 #2` 取 warp 落点 `MainSub1+0x154`） |
 | th11 | 🟡 静态定案 | 章节 37/37、boss 88/88（全表 125/125） | —（st4 六机体分支 18 行全收录） |
 | th12 | 🟡 静态定案 | 章节 43/43、boss 71/71（全表 114/114） | —（`ST6 BOSS9/10` 已修正为 `BossCard5/6`） |
@@ -114,7 +116,7 @@
 3. ~~**th10–th13 报告完成但 CSV 未回填**~~ → **已消解（2026-10-17）**：四作 CSV 全部回填（109 / 125 / 114 / 116 = 464 行，**100%**）；th10 的 st1–st3 走 `sub名+0x偏移` 二级粒度。
 4. ~~**th14 章节行 0、th17/th18 章节行 0**~~ → **已消解（2026-10-16）**：th14/15/17/18 章节行与 boss 行**全部回填**，整体回填率 **312/1028（70% 空）→ 571/1035（45% 空）**。剩余空白**全在 th10–th13**（逆向完成、白名单未枚举）。
 5. ~~**th15 回填最少**~~ → **已消解（2026-10-16）**：th15 全表 119/119（参照作已补齐）。
-6. ~~**th06–th08 完全空白**~~ → **2026-10-16 E0 建档、2026-10-19 th07/th08 E1 收口**。`docs/th06|th07|th08/thXX_ecl_re_requests.md` 已建（A 代口径，Q1 改为「sub 索引 / 时间值 / 指令偏移」三选一）。**th07 / th08 E1 逆向报告已完成**（`docs/th07/th07_ecl_re_report.md`、`docs/th08/th08_ecl_re_report.md`，Q1–Q9 静态定案）：**章节定位走「时间轴」**（th07 读 `TL_i+8` 时间值、th08 读宿主 cursor 的 ip），两作**运行期都不保留 sub 名**。**th07 / th08 的 E2 CSV 骨架亦已生成**（2026-10-19；`docs/logger/th07_checkpoints.csv` 38+103=141、`docs/logger/th08_checkpoints.csv` 37+121=158；A 代第 1 列表头为 **`时间轴位置`**）。**仍欠**：**th06 逆向未跑、无 CSV**；三作的 **E3/E4 回填未做**；A 代**无 eclmap**、`.ecl` 未从 `.dat` 解出、`reasm/exes/` 缺 `th06.exe`（见各作 requests §12）。总括 §0/§4/§5.1 与 `checkpoint_csv_workflow.md` §9 已同步。
+6. ~~**th06–th08 完全空白**~~ → **2026-10-16 E0 建档、2026-10-19 th07/th08 E1 收口、2026-10-22 th06 E1 收口（三作齐）**。`docs/th06|th07|th08/thXX_ecl_re_requests.md` 已建（A 代口径，Q1 改为「sub 索引 / 时间值 / 指令偏移」三选一）。**th07 / th08 逆向报告**：`docs/th07/th07_ecl_re_report.md`、`docs/th08/th08_ecl_re_report.md`；**th06 逆向报告（2026-10-22）**：`docs/th06/th06_ecl_re_report.md`（Q1–Q9 + ECL 文件结构 + 时间轴 opcode 全表 + 段落入口表）。**章节定位一律走「时间轴」**（th06 读 `tlTime`/`tlInstr`、th07 读 `TL_i+8/+0xC`、th08 读宿主 cursor 的 ip），三作**运行期都不保留 sub 名**。**th07 / th08 的 E2 CSV 骨架已生成**（2026-10-19；`th07` 现 37+103=140、`th08` 37+121=158）。**2026-10-22 两作 E3/E4 已回填**：th07 **140/140**（删 `ST6 #2`）、th08 **141/158**（`LW 1..17` 按用户决定留空）；逐行表见 `docs/th07|th08/thXX_checkpoint_entry_report.md`，自检脚本 `docs/logger/tools/verify_th07|08_entries.py`。**仍欠**：**th06 的 E2 CSV 骨架未生成**（E3/E4 随之未做）；**eclmap 仍缺**（⇒ 指令级语义名不可得；但 `.ecl`/`.decl` 已于 2026-10-21 备齐 th06–th08 ⇒ **`SubN` 级具名可用**，th06 已核对）。总括 §0/§4/§5.1 与 `checkpoint_csv_workflow.md` §9 已同步。
 7. ~~**日志（JSON 落盘）功能整体未起步**~~ → **已部分落地（2026-10-17）**：共享模块 `thprac_games.{h,cpp}`（`#pragma region Game Session Log`）+ **th14 / th15 / th16 / th17 / th18** 各 8 处接线；JSONL 一行一局、月度文件 `logger_sessions_YYYYMM.jsonl`；口径见 `docs/req_logger.md` §落地口径、实现见 `docs/logger/logger_impl_report.md`。**Release|x86 编译通过；五作真机均未测**（按用户安排，功能补齐后统一验证）。**未接线**：th10–th13（白名单**已枚举**，但监控 E5 未实现 ⇒ 无生成物可接线）、th06–th08（逆向未跑）。th18 的机体类型字段留空（无现成来源，见 `docs/logger/logger_impl_report.md` §8 第 6 条）。
 8. ~~**源码侧无实现**~~ **已收口（2026-10-17）**：**th14 / th15 / th16 / th17 / th18 五作均已实现** —— 各作 `thprac_thXX.cpp` 内的 `THxxLogger` 模块 + 生成物 `thprac_thXX_checkpoints_gen.cpp` + 脚本 `docs/logger/tools/gen_thXX_checkpoints.py`，工程登记于 `thprac.vcxproj` / `.filters`（th16 见 `docs/th16/th16_monitor_impl_report.md`）。**th10–th13 仍无实现**（白名单未枚举 ⇒ 无 CSV 可嵌入）、**th06–th08 无实现**（逆向未跑）。既有 warp（`ECLHelper::SetBaseAddr`/`ECLJump`）与「freeze ECL sub time」hook（`thprac_th10.cpp:541`、`thprac_th14.cpp:590`、`thprac_th18.cpp:1202`）均不读函数名。原型 `thprac_th15_missbomb.{h,cpp}`（含 `GetEclSubName()`）仅在 **`feat/plogth15`** 分支、**未合并**，且因落盘崩溃被弃用 —— th15 正式实现已改为「不缓存任何指针」。
 9. **E6 真机验证（监控侧）：th16 已做（除完整全关），其余八作全部未做**。th16 的 `docs/th16/th16_monitor_impl_report.md` §7 / §7.1 清单已逐项通过，仅剩全关测试；**th14 / th15 / th17 / th18 的监控实现已编译通过但真机未测**（建议照 th16 §7 / §7.1 清单逐项跑）；th10–th13 / th06–th08 无实现，无从验证。AGENTS.md §2.5 要求真机验证后方可作结论。
@@ -165,6 +167,16 @@ th18      49     49     65     65    114    114
 > 合计 **1035/1035**（空值率 **0%**，2026-10-17 复算）。th14 的 `ST4A MID1` 等 A/B 行不匹配章节行正则，正确计入 boss 行。
 > th10 的 18 行 st1–st3 走 `sub名+0x偏移` 记法（如 `main+0x28`），仍计入「非空」。
 
+**A 代（th07 / th08）复算**（2026-10-22；上表脚本只遍历 th10–th18）：
+
+```text
+work  chap_f chap_t boss_f boss_t  all_f  all_t
+th07      37     37    103    103    140    140
+th08      37     37    104    121    141    158
+```
+
+> th07 删 `ST6 #2` 后为 140 行（`checkpoint_csv_workflow.md` §9 已同步）；th08 的 17 个空值全部是 `ST8` 的 `LW 1..17`（用户 2026-10-22 决定「LW 无监控意义」，**不算缺口**）。th06 仍无 CSV，不在此表。
+
 ---
 
 ## 6. 变更记录
@@ -195,3 +207,5 @@ th18      49     49     65     65    114    114
 | 2026-10-20 | **th16 新增 spellFlag（口径 15，仅 th16）**：`thprac_th16.cpp` 增 `SPELL_OBJ_PTR = 0x4a6db0` / `SampleSpellCard()` / `mSpellFlag` 等，轮询 `obj+0x78` bit0 的 1→0 下降沿 ⇒ `++`；`mSection` 换新 checkpoint ⇒ `--`；interrupt 条件 `spellFlag == 0 && !mStageClear`，**`mStageClear` 保留兜底**。**零新 hook、共享层零改动**。`§1 总表` th16 的「日志落盘」列改为 `🟡 已接线（含单章节合并 + interrupt/stageClear + spellFlag）`。口径见 `docs/req_logger.md` 口径 15，实现见 `docs/logger/logger_impl_report.md` §4.4.2，调研见 `docs/th16/th16_spell_flag_report.md`，副作用见 `knownBugs.md` #12。**本机无编译环境：未编译、未真机（🟡）**。 |
 | 2026-10-20 | **spellFlag 推广到 th14/15/17/18（五作齐）**：四作各 9 处接线，逐字同构；常量逐作独立（th14 `0x4DB534+0x7C`、th15 `0x4E9A70+0x78`、th17 复用 `SPELLCARD_PTR=0x4B7690+0x78`、th18 `0x4CF2C0+0x78`）。`mStageClear` 五作均保留。逐作报告：`docs/th14|th15|th17|th18/thXX_spell_flag_report.md`；实现见 `docs/logger/logger_impl_report.md` §4.4.2.1。**§1 总表** th14/15/17/18 的「日志落盘」列均加 `+ spellFlag`。**本机无编译环境：未编译、未真机（🟡）**。 |
 | 2026-10-20 | **单章节子句② 修订（口径 16）**：口径 13 的子句② 由「`cpCount==1 && 含miss/bomb/break`」改为「`cpCount==1 && 不是『只有interrupt』`」（即**零事件也算**）；起因是口径 15 的 `spellFlag` 抑制 `interrupt` ⇒ 零事件的 `cpCount==1` 可达，旧判据把它打成「非单章节」并**作废合并基线**，同日同起始 checkpoint 的连续练习漏合并。`thprac_games.cpp` 新增 `GameSessionOnlyInterruptEvents()`；子句①（`cpCount==2 && 含interrupt`）与「只有 interrupt ⇒ 不算」不变。**共享层改动 ⇒ 五作都生效**。**Release\|x86 编译通过；真机验证通过（2026-10-20）**。 |
+| 2026-10-22 | **A 代 th06 E1 逆向收口**：新建 `docs/th06/th06_ecl_re_report.md`（Q1–Q9 静态定案），回填 `docs/th06/th06_ecl_re_requests.md` 各 Q；**首次使用 2026-10-21 备齐的 `.ecl`/`.decl` 素材**。**§1 总表**：th06 的 **E1 ❌ → ✅🟡**（综合档位改「E1 逆向完成」），并同步头部与 §2 档 A′/§3 明细/§4 第 6 条。核心结论：**th06 的「当前位置」＝全局唯一一条时间轴** —— `mgr=ENEMY_MANAGER=0x4B79C8`，**`tlTime=*(i32*)(mgr+0xEE5E8)`（＝`*(i32*)0x5A5FB0`，`ECLWarp` 写点）**、**`tlInstr=*(u32*)(mgr+0xEE5DC)`（＝`0x5A5FA4`，`tlOff=tlInstr−pCode`）**；时间轴更新 `0x411530`（每帧一次，`0x4123F0` 调用）、时钟 `0x412E07`–`0x412E31`（`ZunTimer::Tick=0x424285`）；**既不是** th07 的 `count` 条 timeline、**也不是** th08 的宿主 cursor。**Q2**：sub 表 `*(u32*)(0x487E50+4)`、时间轴起点 `*(u32*)(0x487E50+8)`，**ECL 文件头实测** `+0` i16 subCount / `+4` u32 时间轴偏移 / `+0x10` u32[subCount] sub 表（加载器 `0x407340` 绝对化）；`call`=0x23 / `ret`=0x24。**Q3**：调用栈 `enemy+0x9DC` / 帧 `0x4C` / 深度 `+0xC3C`（上限 8）。**Q4**：宿主静态（`0x4B79C8`/`0x487E50`），链元素 `0x5A5FB4`（calc，优先级 9）→`0x4123E0`，进关由 `0x410E30` 全量清零 ⇒ **无需捕获**。**Q5**：每帧驱动 `0x411530`，**推荐不挂 hook**（备选 `0x411530` 9B；`0x412E31`/`0x41188A`/`0x411669` 已被 thprac 占用）。**Q6**：运行期无名，**但 `.decl` 已备齐 ⇒ `SubN`＝索引 N 可离线映射**（7/7 文件 `subCount` 与 `decl` 全等）。**Q8**：`ECLWarp` 直写时间、下一帧快进、**指针不回退**。**Q9**：latch + 主键「落点偏移精确相等」+ boss 相位副键 `SubN`；入口列仍记**时间值**。**交叉印证**：thprac books 常量 `0xCDD4`/`0xCE7C` 与 `ecldata4.ecl` 时间轴指令边界逐字节对齐。**仍 🟡 静态定案、未真机；监控（E5）未实现；th06 的 E2 CSV 骨架未生成。** |
+| 2026-10-22 | **A 代 th07 / th08 E3/E4 回填收口**。CSV：th07 第 1 列 **140/140**（十进制时间值；**删 `ST6 #2`** —— 与 `ST6 CHAOS` 同为 1180、同一 `ins_0`，用户裁决留 CHAOS；章节 38→37、合计 141→140）；th08 第 1 列 **141/158**（`时间值/0x偏移`；章节 37 + boss 104；`LW 1..17` 按用户决定留空、不计缺口）。**§1 总表**：两作 E3/E4 由 ❌ 改 ✅（th08 E4 记 🟡 104/121），th07 E2 行数改 `37+103=140`，综合档位改「CSV 回填」。**§3 明细**两行改写。**§4 第 6 条**：E3/E4 改「已回填」，素材缺口改「仅缺 th06 的 E2」。**§5** 追加 A 代复算块。**工作流** §9/§10 同步。**关键订正**：① th08 的 141 个 offset **全部落在时间轴车道命令区**、与 sub 指令链交集为空 ⇒ `th08_ecl_re_report.md` §9.2 的「读宿主 cursor 精确匹配」作废，改读 **Timeline 车道**、**offset 单键**；② th07 报告 §11.1 列名/列位、§11.2 分组粒度与 sub id 区间、`ST1_MID1` 伪注共 8 处表述订正（数值无错）。新增 `docs/th07|th08/thXX_checkpoint_entry_report.md` 与 `docs/logger/tools/verify_th07|08_entries.py`。**全部 🟡 静态定案、未真机。** |

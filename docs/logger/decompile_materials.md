@@ -11,13 +11,13 @@
 
 | 类别 | 位置 | 内容 | 来源 | 逐作数量 |
 | --- | --- | --- | --- | --- |
-| 原始可执行 | `../exes/th07.exe` ~ `th18.exe` | 各作原始 PE | 各作官方安装（详见 §2） | 11 个 |
-| 拆包 ECL | `../exes/ecl/th10`~`th18/*.ecl` | 游戏 `data\*.ecl` 原始脚本 | 各作拆包目录（详见 §3.1） | 8/20/9/21/24/23/22/22/22 |
-| 反编译 decl | `../exes/ecl_dump/th10`~`th18/*.decl` | `thecl -d` 反编译结果 | THTK thtk12（详见 §3.2） | 同左 |
-| dump 汇总 | `../exes/ecl_dump/_dump_report.txt` | 逐作「期望/实际/失败」 | `dump_ecl_decl.ps1` 产出 | 171/171 成功 |
+| 原始可执行 | `../exes/th06.exe` ~ `th18.exe` | 各作原始 PE | 各作官方安装（详见 §2） | 12 个 |
+| 拆包 ECL | `../exes/ecl/th06`~`th18/*.ecl` | 游戏 `data\*.ecl` 原始脚本 | 各作拆包目录（详见 §3.1） | A 代 7/8/24；B/C 代 8/20/9/21/24/23/22/22/22 |
+| 反编译 decl | `../exes/ecl_dump/th06`~`th18/*.decl` | `thecl -d` 反编译结果 | THTK thtk12（详见 §3.2） | 同左 |
+| dump 汇总 | `../exes/ecl_dump/_dump_report.txt`（B/C 代）、`_dump_report_a_gen.txt`（A 代） | 逐作「期望/实际/失败」 | `dump_ecl_decl.ps1` 产出 | B/C 代 171/171；A 代 39/39 |
 
 - **`ecl/` 与 `ecl_dump/` 是同一批脚本的两面**：`ecl/thXX/*.ecl` 是**原始二进制**，`ecl_dump/thXX/*.decl` 是其**反编译文本**（sub 名、`@call` 结构等）。
-- **A 代（th06–th08）素材现状**：th07 / th08 **只有 exe、没有 ecl**；**th06 连 exe 都没有**（本体在 `D:\C P\C2H2\[th06]\東方紅魔郷.exe`，512000 B / `ts=1038721275`，与 `thprac_launcher_games_def.h` 识别表一致，**尚未复制进 `../exes/`**）。三作均**无 eclmap**（THTK `MAP/` 只有 `ECL_MAP_08.txt` 及以后）⇒ **A 代无法离线枚举具名 sub**。A 代已于 2026-10-16 完成 **E0 建档**：`docs/th06|th07|th08/thXX_ecl_re_requests.md`。
+- **A 代（th06–th08）素材现状（2026-10-21 补齐）**：三作**exe + `.ecl` + `.decl` 均已入库** —— `th06.exe` / `th07.exe` / `th08.exe`；`ecl/th06` 7 份、`ecl/th07` 8 份、`ecl/th08` 24 份；`ecl_dump/` 同名 `.decl`（汇总见 `ecl_dump/_dump_report_a_gen.txt`，39/39 成功）。三作**仍无 eclmap**（THTK `MAP/` 只有 `ECL_MAP_08.txt` 及以后）⇒ **只有 `sub` 级具名（`SubN` ＝ sub 索引 N），没有指令级语义名**。A 代已于 2026-10-16 完成 **E0 建档**（`docs/th06|th07|th08/thXX_ecl_re_requests.md`），**E1 三作齐**（th07/th08 2026-10-19、th06 2026-10-22）。
 
 ---
 
@@ -42,6 +42,7 @@
 
 | 作品 | 文件 | 字节 | PE `TimeDateStamp` | 备注 |
 | --- | --- | --- | --- | --- |
+| th06 | `th06.exe` | 512000 | 1038721275 | A 代；本体名 `東方紅魔郷.exe`；`SizeOfCode=0x69000`；`sha256=9f76483c…`（2026-10-21 入库） |
 | th07 | `th07.exe` | 650752 | 1066942337 | 日文版；`sha256=f7d03ba1…` 与 `[th07] 东方妖妖梦 (日文版)` 逐字节相同 |
 | th08 | `th08.exe` | 840704 | 1095610188 | 日文版；`sha256=330fbdbf…` 与 `[th08] 东方永夜抄 (日文版)` 逐字节相同 |
 | th10 | `th10.exe` | 487936 | 1186086096 | B 代引擎 |
@@ -57,7 +58,7 @@
 - 全部 `ImageBase = 0x400000`、`RELOCS_STRIPPED`（不重定位）⇒ **`RVA = VA − 0x400000`**。
 - **同一性背书**：上表 th10–th18 的尺寸 / `TimeDateStamp` 与 `thprac/src/thprac/thprac_launcher_games_def.h` 各作 ORIGINAL 条目一致；th07 / th08 另有 sha256 与官方安装逐字节比对记录（见 `docs/th07/`、`docs/th08/` 报告头部）。
 - 各篇 `docs/thXX/thXX_re_disasm_report.md` / `thXX_ecl_re_report.md` 头部引用的 `../exes/thXX.exe` 即本目录。
-- **A 代缺 `th06.exe`**：上表无 th06 —— 本体在 `D:\C P\C2H2\[th06]\東方紅魔郷.exe`（512000 B，`TimeDateStamp = 1038721275`，`SizeOfCode = 430080`），指纹与 `thprac_launcher_games_def.h:953` 识别表一致，**尚未入库**（属「素材补齐」，见 `docs/th06/th06_ecl_re_requests.md` §12）。
+- **A 代 `th06.exe` 已于 2026-10-21 入库**（`../exes/th06.exe`，512000 B，`TimeDateStamp = 1038721275`，`SizeOfCode = 430080`，`sha256 = 9f76483c…`），指纹与 `thprac_launcher_games_def.h:459` 的 ORIGINAL 条目一致；随 `.ecl`/`.decl` 一并到位，th06 的 E1 逆向已于 2026-10-22 完成（`docs/th06/th06_ecl_re_report.md`）。
 
 ---
 
@@ -67,6 +68,7 @@
 
 | 作品 | 目录 | 命名形态 | `.ecl` 数 |
 | --- | --- | --- | --- |
+| th06 | `ecl/th06/` | `ecldata1.ecl` … `ecldata7.ecl`（**A 代：一关一份，无 `default`/`bs`/`mbs` 拆分**） | 7 |
 | th10 | `ecl/th10/` | `stageNN.ecl`（+`default.ecl`） | 8 |
 | th11 | `ecl/th11/` | `stageNN.ecl` / `stageNNboss.ecl` / `stageNNmboss.ecl` / `stage4c0X{a,b,c}.ecl`（+`default.ecl`） | 20 |
 | th12 | `ecl/th12/` | `stageNN.ecl` / `stage07boss.ecl`（+`default.ecl`） | 9 |
@@ -85,6 +87,7 @@
 
 | 作品 | 目录 | `.decl` 数 | 备注 |
 | --- | --- | --- | --- |
+| th06 | `ecl_dump/th06/` | 7 | **A 代；无 eclmap ⇒ `ins_*` + 自动 sub 名 `Sub0..SubN`** |
 | th10 | `ecl_dump/th10/` | 8 | |
 | th11 | `ecl_dump/th11/` | 20 | |
 | th12 | `ecl_dump/th12/` | 9 | |
@@ -98,6 +101,7 @@
 **生成工具**：THTK **release 12** 的 `thecl.exe`（Windows 侧 `D:\C P\C2H2\拆包\THTK\thtk\thtk12\thecl.exe`），
 命令形如 `thecl -d <版本> [-m ECL_MAP_<版本>.txt] <in.ecl> <out.decl>`；`<版本>` 直接取作号 `10 … 18`。
 eclmap（把 `ins_NNN(...)` 翻成具名指令）在 `THTK\MAP\ECL_MAP_<XX>.txt`，**没有 18**，故 th18 不加 `-m`。
+**A 代（th06–th08）另有一条 2026-10-21 补做的生成链**：`thdat -x6/-x7/-x8` 从各作 `.dat` 只取 `*.ecl`（**th06 取自 `紅魔郷ST.DAT`** —— 逐包内唯一含 `.ecl` 者），再 `thecl -d6/-d7/-d8`（th08 另加 `-m ECL_MAP_08.txt`；th06/th07 **无 map**）。汇总见 `_dump_report_a_gen.txt`（39/39 成功）。
 
 **生成脚本**：`docs/logger/tools/dump_ecl_decl.ps1`（Windows / PowerShell）。
 按 `[th<版本>]` 前缀定位唯一含 `data` 的拆包目录，每作 `glob data\*.ecl` 全量 dump，逐文件按「退出码 / 产物非空 / 含 `^void`」判成败，结尾落 `_dump_report.txt`。
@@ -120,6 +124,9 @@ Windows 产物  D:\workshop\reasm\exes\ecl_dump\thXX\*.decl
 **dump 汇总**（`../exes/ecl_dump/_dump_report.txt`，2026-10-14 20:55:56）：
 
 ```text
+th06   期望   7  实际   7  失败 0   <- [th06]  ecldata1..7.ecl（无 eclmap，输出 ins_*）      ← 2026-10-21（_dump_report_a_gen.txt）
+th07   期望   8  实际   8  失败 0   <- [th07] 东方妖妖梦 (日文版)  ecldata1..8.ecl（无 map）  ← 同上
+th08   期望  24  实际  24  失败 0   <- [th08] 东方永夜抄 (日文版)  ecldata*.ecl（套用 MAP_08）  ← 同上
 th10   期望   8  实际   8  失败 0   <- [th10] 东方风神录
 th11   期望  20  实际  20  失败 0   <- [th11] 东方地灵殿 (汉化版+日文版)
 th12   期望   9  实际   9  失败 0   <- [th12] 东方星莲船 (汉化版+日文版)
@@ -167,3 +174,4 @@ th15 作为**参照作**，另有一条**独立素材来源**（相对 `thprac/`
 | 2026-10-15 | 建档。登记 `../exes` 下的 exe / ecl / decl 与 `../th15decode/` 的来源、清单、生成链与复核方式；作为各篇 `thXX_ecl_re_report.md` 的素材来源统一出处。 |
 | 2026-10-16 | **补记 A 代（th06–th08）素材缺口**：§0/§2 注明 th06 **无 exe**（本体在 `D:\C P\C2H2\[th06]\東方紅魔郷.exe`，指纹已实测一致、尚未入库）、三作**无 eclmap**（THTK `MAP/` 无 `ECL_MAP_06/07.txt`）、`.ecl` 未从 `.dat` 解出 ⇒ **A 代无法离线枚举具名 sub**。A 代已 E0 建档（`docs/th06\|th07\|th08/thXX_ecl_re_requests.md`）。 |
 | 2026-10-17 | **§3.1 补记「实际被引用」情况**：拆包目录里的 `.ecl` 不一定被该关 `ecli{}` 引用（th13 `st06mbs.ecl` 未用；th10 无独立 boss 文件、th12 仅 `stage07boss.ecl`）。离线枚举以 `ecli{}` 为准。 |
+| 2026-10-22 | **A 代（th06–th08）素材补齐登记**：§0 改写「A 代素材现状」—— `th06.exe`（512000 B / `ts=1038721275` / `sha256=9f76483c…`）入库，三作 `.ecl`（7/8/24）与 `.decl`（7/8/24）均已在本机，另见 `_dump_report_a_gen.txt`（39/39 成功）；**仍无 eclmap** ⇒ 只有 `SubN`（＝sub 索引 N）级具名。§2 补 th06 行、§3.1 补 th06（`ecldata1..7.ecl`，一关一份）、§3.2 补 th06（`ins_*` + 自动 sub 名）、§3.2 生成链补 A 代（`thdat -x6/-x7/-x8` + `thecl -d6/-d7/-d8`；**th06 取自 `紅魔郷ST.DAT`**）、dump 汇总补 A 代三行。**素材已足够支撑 A 代 E1**（th06 报告 `docs/th06/th06_ecl_re_report.md` 即据此完成）。 |
