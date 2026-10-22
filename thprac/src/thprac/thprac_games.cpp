@@ -1476,16 +1476,20 @@ static bool GameSessionHasInterruptEvent(const GameSessionData& d)
     return false;
 }
 
-// 「单章节」（口径 13，2026-10-18 修订，取代口径 11 的原判据）：
-//   - 只 latch 了 1 段，且含 miss/bomb/break（在首段内就出事）⇒ 单章节；
-//   - 只 latch 了 2 段，且含 interrupt（被打断）⇒ 单章节；
-//   - 只 latch 了 1 段且**只有** interrupt（warp 进去、没 miss 就退到菜单）⇒ 不算。
-// 注意：不含 interrupt 的作品（th14/15/17/18）第二个子句永不成立 ⇒ 它们「干净走完
-// 两段」的练习局不再合并。这是 2026-10-18 定案接受的跨作行为变化（见 req_logger.md 口径 13）。
+// 「只有 interrupt」：有事件且全是 interrupt（warp 进去、没 miss 就退）。
+// 零事件不算：口径 15 的 spellFlag 会抑制 interrupt，干净退出的局可能一条事件都没有。
+static bool GameSessionOnlyInterruptEvents(const GameSessionData& d)
+{
+    return d.eventCount > 0 && !GameSessionHasAttemptEvent(d);
+}
+
+// 「单章节」（口径 13，子句② 经口径 16 修订）：
+//   ① 只 latch 2 段且含 interrupt；
+//   ② 只 latch 1 段且不是「只有 interrupt」（含零事件的干净局）。
 static bool GameSessionIsSingleChapter(const GameSessionData& d)
 {
     return (d.checkpointCount == 2 && GameSessionHasInterruptEvent(d))
-        || (d.checkpointCount == 1 && GameSessionHasAttemptEvent(d));
+        || (d.checkpointCount == 1 && !GameSessionOnlyInterruptEvents(d));
 }
 
 // 同日：只比记录自带 start 的年月日，不看时刻。
