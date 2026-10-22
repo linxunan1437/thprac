@@ -6,6 +6,7 @@
 > 代码：`thprac/src/thprac/thprac_games.{h,cpp}`（共享会话模块，新增 `#pragma region Game Session Log`）、`thprac/src/thprac/thprac_th14/15/16/17/18.cpp`（各作 Logger 接线）
 > 分支 / 提交：`lxn/game-logger`；`feat(logger): 共享一局日志落盘模块`、`beta: logger 日志落盘 th14–th18 接线`
 > 状态：**已接线 + 编译通过（Release|x86）**；**五作最小冒烟通过**（2026-10-18，仅确认功能可用；**边界项未逐项验证**）
+> 覆盖范围补充（2026-10-22）：**th10–th13 亦已于 2026-10-20 完成监控 + 日志接线**（逐作见 `docs/thXX/thXX_monitor_impl_report.md` §9）；本文正文（§0–§8）仍以 th14–th18 五作为基线，跨作差异表未逐条重写。
 > 地址口径：本文不新增任何地址。`PLAYER_PTR` / `STAGE_NUM` / 机体地址一律复用各作 `thprac_thXX.cpp` 顶部的 `enum addrs` 或 IGI 面板既有读法。
 
 ---
@@ -429,7 +430,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 - **th18 的机体类型**：无现成来源，需新增逆向，不在范围。
 - **强退进程的落盘**：用户定案「视为主动放弃记录」。
 - **日志文件读回**：本迭代只写不读（单章节合并的就地改写是「改自己刚写的那一行」，不涉及解析既有行，也不跨进程）。
-- **th10–th13 / th06–th08**：监控模块尚未落地（th10–th13 白名单已枚举但 E5 未实现；th06–th08 **E1 逆向已完成**（th07/th08 2026-10-19、th06 2026-10-22）、E2–E5 未做），无从接线。
+- **th06–th08**：监控模块尚未落地（E1 已完成：th07/th08 2026-10-19、th06 2026-10-22；E2–E5 未做），无从接线。**th10–th13 已于 2026-10-20 完成监控 + 日志接线**（与 th14–th18 同构 8 处调用，逐作见 `docs/thXX/thXX_monitor_impl_report.md` §9 与 `logger_progress.md` §1），**不属本清单**。
 - **`th16_release` / th18 的 deadbomb**：都不是 bomb 语义（th18 的 deadbomb 已在 IGI 里单独显示在 miss 行），不纳入 `events`。
 
 ---
@@ -449,3 +450,4 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | 2026-10-20 | **spellFlag 推广到 th14/15/17/18（五作齐）**：逐作新增 `SampleSpellCard()` + `mSpellFlag/mSpellObj/mSpellActive`，9 处接线与 th16 逐字同构；常量逐作独立（§4.4.2.1）：th14 `0x4DB534+0x7C`、th15 `0x4E9A70+0x78`、th17 复用 `SPELLCARD_PTR=0x4B7690` + `+0x78`、th18 `0x4CF2C0+0x78`。`mStageClear` 五作均保留。th15 有第二清位点 `0x420EDA`（重开/载入），靠对象指针 / 换关 / 新局复位吸收。静态核对：th14 唯一 card→card 有 160 帧过渡；th15/17/18 均 0。逐作报告：`docs/th14|th15|th17|th18/thXX_spell_flag_report.md`。**本机无编译环境：未编译、未真机（🟡）**。 |
 | 2026-10-20 | **单章节子句② 修订（口径 16）**：口径 13 的子句② 由 `cpCount==1 && 含miss/bomb/break` 改为 `cpCount==1 && 不是「只有interrupt」`（即 `cpCount==1 && (含miss/bomb/break \|\| eventCount == 0)`）。起因：口径 15 的 `spellFlag` 抑制 `interrupt` ⇒ 零事件的 `cpCount==1` 可达，旧判据把它打成「非单章节」并**作废合并基线**（`MergeOrAppend()` 分支 1），同日同起始 checkpoint 的连续练习漏合并。`thprac_games.cpp` 新增 `GameSessionOnlyInterruptEvents()`，`GameSessionIsSingleChapter()` 子句② 改用它；子句① 与「只有 interrupt ⇒ 不算」不变。**共享层改动 ⇒ 五作都生效**。**Release\|x86 编译通过；真机验证通过（2026-10-20）**。 |
 | 2026-10-22 | **§9 缺口行订正**：「th10–th13 / th06–th08 监控模块尚未落地（th10–th13 白名单未枚举、th06–08 逆向未跑）」改为「th10–th13 白名单已枚举但 E5 未实现；**th06–th08 E1 逆向已完成**（th07/th08 2026-10-19、th06 2026-10-22）、E2–E5 未做」。**实现与地址一字未改**（本作无实现，仅同步逆向进度）。 |
+| 2026-10-22 | **§9 缺口行再订正**：上一条仍把 **th10–th13** 列为「E5 未实现」——与代码不符（四作 2026-10-20 已落地 `THxxLogger` + 8 处日志接线，见各作 `_monitor_impl_report.md` §9）。§9 现只保留 **th06–th08**（E1 已完成、E2–E5 未做），并注明 th10–th13 不属「明确不做」；头部补覆盖范围注记。**未改任何地址与实现描述。** |

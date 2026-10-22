@@ -24,7 +24,7 @@
 | **Q3 函数栈** | ✅ **存在可遍历的显式调用栈**（在敌机对象里） | 栈基址 `enemy+0x9DC`，**帧长 `0x4C`**，深度 `*(i32*)(enemy+0xC3C)`，**上限 8（`0..7`）**；帧 = **整个 `EnemyEclContext` 的快照**（含 `+0` 指令指针、`+0x48` sub id）。**只作事实记录，不参与判定**（沿用总括 §6 Q9 的 latch 口径）。 |
 | **Q4 主线宿主捕获点** | ✅ **A 代是静态对象，无需 hook 捕获** | `ENEMY_MANAGER = 0x4B79C8`（thprac 常量，静态）、`ECL_MANAGER = 0x487E50`（静态）。管理器由**链元素** `0x5A5FB4`（calc，优先级 9，回调 `0x4123E0`）驱动，该元素由 `0x412320` 注册。**整份管理器在每次进关被 `0x410E30` 全量清零**（`rep stosd 0x3B97B`＝`0xEE5EC` 字节）⇒ 时间轴指针/时间也随之归零，重新从 `0x487E58` 装入。 |
 | **Q5 解释器命中点** | ✅ **每帧唯一驱动点＝时间轴更新 `0x411530`**（`ECX = mgr`）；**推荐完全不挂 hook** | `0x4123E0`（管理器每帧更新）在 `0x4123F0` 调 `0x411530`；后者逐条时间轴指令「比较/执行/跳过/等待」。时间轴的时钟推进在 `0x412E07`–`0x412E31`（`ZunTimer::Tick` 于 `0x424285`）。thprac 已占用 `0x412E31`（5B，`TH_TIMELOCK`）与 `0x41188A`/`0x411669`（各 3B，`TH06_SavesHook`）⇒ **本报告建议「不挂 hook、在 IGI 渲染时直接读静态地址」**；若必须挂，用**未被占用的 `0x411530` 入口（9B）**。 |
-| **Q6 名字来源** | ❌ **运行期不保留 sub 名**；✅ **但离线已可具名（本报告新增能力）** | ECL 文件头只有 subCount + 偏移表，**没有名字区**；加载器 `0x407340` 全文无字符串处理。**但 th06 的 `.ecl`/`.decl` 已于 2026-10-21 备齐**：`SubN`（＝ sub 索引 N）与文件偏移一一对应，本报告已把 321 个 sub 全部解出并与 decl 逐条对齐（`subCount` 与 `decl` 的 `sub` 数量 7/7 全等）。⇒ **th06 可以做到「偏移 ↔ sub 索引 ↔ decl 名」的离线映射**，这是 th07/th08 做不到的。 |
+| **Q6 名字来源** | ❌ **运行期不保留 sub 名**；✅ **但离线已可具名（本报告逐文件核对）** | ECL 文件头只有 subCount + 偏移表，**没有名字区**；加载器 `0x407340` 全文无字符串处理。**但 th06 的 `.ecl`/`.decl` 已于 2026-10-21 备齐**：`SubN`（＝ sub 索引 N）与文件偏移一一对应，本报告已把 321 个 sub 全部解出并与 decl 逐条对齐（`subCount` 与 `decl` 的 `sub` 数量 7/7 全等）。⇒ **th06 可以做到「偏移 ↔ sub 索引 ↔ decl 名」的离线映射**；`th07 / th08` 自 2026-10-21 起素材同样备齐、具备同一能力（见各自 `_checkpoint_entry_report.md`），差别只是本报告对 th06 做到了逐文件核验。 |
 | **Q7 机体 / 子机 / 难度 / 关卡** | ✅ thprac 既有地址全部有效（有 xref 佐证） | `character = *(u8*)0x69D4BD`（47 处引用）、`shotType = *(u8*)0x69D4BE`（40 处）、`difficulty = *(i32*)0x69BCB0`（79，**解释器直接拿它做 `1<<diff` 的难度跳过掩码**，见 §2.4）、`stage = *(u32*)0x69D6D4`（**1-based**，`= GameManager+0x1A34`，用来索引 ECL 文件名表 `0x4764C4`）。 |
 | **Q8 练习跳转影响** | ✅ **立刻反映** | `ECLWarp(t)` = `*(i32*)0x5A5FB0 = t` = **直写 `mgr+0xEE5E8`（时间轴当前时间）**。下一帧 `0x4115D3` 起的时间比较会把 `tlInstr` **快进**到第一条 `time >= t` 的指令（`0x411D15` 的 `+= size` 循环）。练习模式进关会重载 ECL 并把整个管理器清零 ⇒ 指针回到时间轴起点后再快进。**`THPatch` 的另一半（`pair{}`/`ECLSetTime`/`ECLSetHealth`）改的是 sub 脚本指令，与时间轴无关。** |
 | **Q9 段落判定口径** | ✅ 沿用**路过式 checkpoint（latch）**；th06 读取方案见 §10 | **主键 = 时间轴指令偏移** `tlOff = tlInstr − pCode`（**精确相等匹配**，因为每个段落的入口就是时间轴上的某一条指令）；**副键 = 时间值** `tlTime`；**boss 相位副键 = boss 敌机的当前 sub**（`bosses[i]` → `ctx.subId`）。**入口列口径沿用 A 代「时间值」**（＝ `ECLWarp` 入参，与 `docs/logger/th07_checkpoints.csv` / `th08_checkpoints.csv` 的 `时间轴位置` 列同义）。 |
@@ -126,7 +126,7 @@ E + 0xE52 : u8  flags2（bit2 = 「call 不压栈」；VM 0x407B0D 判它）
 | sub 表 | `*(u32*)(0x487E50+4)`（项 4B，文件 `+0x10`） | `*(u32*)(0x1347938+4)`（项 4B） | `*(u32*)(0x4ECCB8+4)`（项 4B，文件 `+0x48`） |
 | 宿主 | **静态 `0x4B79C8`**，无需捕获 | 静态 `0x9A9B00` | 静态 manager `0x577F20` 内嵌数组 |
 | 解释器 | **两套**：时间轴 `0x411530`（op 0..0xC）+ 敌机 VM `0x4074A0`（op 1..0x87） | timeline `0x41F6F0` + 敌方 VM `0x410520` | 单一 `0x4184B0` |
-| 离线具名 | ✅ **`.ecl` + `.decl` 已备齐**（`SubN`） | ❌ 无素材 | ❌ 无素材 |
+| 离线具名 | ✅ **`.ecl` + `.decl` 已备齐**（`SubN`；本报告逐文件核对） | ✅ 2026-10-21 已备齐（`SubN`；见 `th07_checkpoint_entry_report.md`） | ✅ 2026-10-21 已备齐（`SubN`；另套用 `ECL_MAP_08.txt` ⇒ 指令具名） |
 
 ---
 
@@ -554,7 +554,7 @@ CHAIN(0x69D918) 的 calc 链
 
 ### 7.2 离线：✅ `.decl` 已备齐，`SubN` ＝ sub 索引 N
 
-**这是 th06 相对 th07/th08 的最大优势**（后两作没有 `.ecl`/`.decl`）：
+**三作（th06 / th07 / th08）的 `.ecl`/`.decl` 均已于 2026-10-21 备齐**；本报告对 th06 做了逐文件核对（th07 / th08 的对应核对见各自 `_checkpoint_entry_report.md`）：
 
 - `../exes/ecl/th06/ecldataN.ecl` 与 `../exes/ecl_dump/th06/ecldataN.decl` 7 份齐全（`_dump_report_a_gen.txt` 7/7 成功）；
 - **`SubN` 就是 sub 索引 N**：`thecl` 无 eclmap 时按索引自动命名；本报告已逐文件核对 —— `subCount` 与 `decl` 里 `sub …()` 的数量 **7/7 全等**，且每个 sub 的**指令条数**与 `decl` 的 `ins_*` 条数**逐 sub 相等（差值恒为 1，即末尾的 12 字节终止哨兵 `{-1,-1,12}`，`thecl` 不打印）**；
@@ -934,3 +934,4 @@ pCode+timelineOffset  时间轴指令区（连续到文件尾前 4 字节）
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-22 | 建档（本报告）。th06 的 ECL 段落监控逆向（阶段 E1，静态定案 🟡），**首次使用 2026-10-21 备齐的 `.ecl`/`.decl` 素材**。**Q1**：当前位置＝**全局唯一时间轴的「时间值 + 指令指针」**（`mgr = 0x4B79C8`；`tlInstr = *(u32*)(mgr+0xEE5DC) = 0x5A5FA4`、`tlTime = *(i32*)(mgr+0xEE5E8) = *(i32*)0x5A5FB0`），**没有** th07 的多 timeline、**没有** th08 的宿主 cursor；敌机另有 `enemy+0x990` 的 `EnemyEclContext`（`+0` ip / `+0x0C` 局部时间 / `+0x48` subId）。**Q2**：sub 表 = `*(u32*)(0x487E50+4)`（= `pCode+0x10`）、时间轴起点 = `*(u32*)(0x487E50+8)`（= `pCode + *(u32*)(pCode+4)`），由加载器 `0x407340` 就地绝对化；**文件头布局实测**：`+0` i16 subCount、`+4` u32 时间轴偏移、`+0x10` u32[subCount] sub 偏移表；`call` = opcode 0x23、`ret` = 0x24。**Q3**：调用栈存在（基址 `enemy+0x9DC`、帧 `0x4C`、深度 `+0xC3C`、上限 8），仅事实记录。**Q4**：宿主静态（`0x4B79C8` / `0x487E50`），由链元素 `0x5A5FB4`（calc，优先级 9）驱动 `0x4123E0`，管理器每次进关被 `0x410E30` 全量清零（`rep stosd 0x3B97B` = `0xEE5EC` B）⇒ **无需捕获**。**Q5**：每帧唯一驱动 = `0x411530`（`ECX = mgr`，`0x4123F0` 调用），时钟推进 `0x412E07`–`0x412E31`（`ZunTimer::Tick` = `0x424285`）；thprac 已占 `0x412E31`/`0x41188A`/`0x411669` ⇒ **推荐不挂 hook**，备选 `0x411530`（9B）。**Q6**：运行期无 sub 名（加载器无字符串处理、`call`/生成器只传索引），**但 `.decl` 已备齐** ⇒ `SubN` = sub 索引 N，7/7 文件 `subCount` 与 `decl` 的 `sub` 数全等、逐 sub 指令数差恒为 1（终止哨兵 `{-1,-1,12}`）⇒ **离线可具名**。**Q7**：thprac 既有地址全部有效，另确认 `difficulty` 被解释器用作 `1<<diff` 难度掩码（`0x4074F6`）、`currentStage`（`0x69D6D4`，1-based）= `GameManager+0x1A34` 索引 ECL 文件名表 `0x4764C4`、`bossPresent = GUI(0x69BC30)+0x20 = 0x69BC50`。**Q8**：`ECLWarp` 直写 `timelineTime.current`，下一帧 `0x4115D3` 快进到第一条 `time >= t`；**指针不回退**（同局内往回 warp 无效），须靠进关清零。**Q9**：沿用 latch；th06 方案 = **主键「时间轴指令偏移精确相等」+ 副键时间值 + boss 相位用 `bosses[k]` 的 `ctx.subId`**；入口列口径沿用 A 代「时间值」。新增附录 A（ECL 文件结构 + 7 文件统计 + books 常量交叉印证）、附录 B（时间轴 opcode 0..0xC 全表 + 各关分布）、附录 C（40 个道中 portion 的 warp/落点/sub）、附录 D（70 个 boss section 的 warp/落点/sub/补丁归属）。**未真机三态**；**未生成 `docs/logger/th06_checkpoints.csv`**（E2 属后续阶段）。 |
+| 2026-10-22 | **素材对比口径订正（不改结论 / 地址）**：原文 §1 对比表与 §7.2 写「th07 / th08 无 `.ecl`/`.decl`」「th06 相对两作的最大优势」，与 2026-10-21 已补齐三作素材的事实矛盾（`_dump_report_a_gen.txt` 39/39）。现改为：**三作素材均已备齐，均可做 `SubN`（＝ sub 索引 N）离线映射**；th06 的差异只在于本报告做了 7/7 逐文件核验（th07 8 份 / th08 24 份的核对见各自 `thXX_checkpoint_entry_report.md`）。**未改任何地址、结论与数值。** |
