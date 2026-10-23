@@ -55,6 +55,7 @@
     <ClInclude Include="src\thprac\thprac_gui_input.h" />
     <ClInclude Include="src\thprac\thprac_launcher_cfg.h" />
     <ClInclude Include="src\thprac\thprac_launcher_games.h" />
+    <ClInclude Include="src\thprac\thprac_launcher_data.h" />
     <ClInclude Include="src\thprac\thprac_launcher_games_def.h" />
     <ClInclude Include="src\thprac\thprac_launcher_keng.h" />
     <ClInclude Include="src\thprac\thprac_launcher_links.h" />
@@ -115,6 +116,7 @@
     <ClCompile Include="src\thprac\thprac_gui_input.cpp" />
     <ClCompile Include="src\thprac\thprac_launcher_cfg.cpp" />
     <ClCompile Include="src\thprac\thprac_launcher_games.cpp" />
+    <ClCompile Include="src\thprac\thprac_launcher_data.cpp" />
     <ClCompile Include="src\thprac\thprac_launcher_keng.cpp" />
     <ClCompile Include="src\thprac\thprac_launcher_links.cpp" />
     <ClCompile Include="src\thprac\thprac_launcher_main.cpp" />

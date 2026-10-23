@@ -48,6 +48,7 @@
 - 总括（先读）：`docs/logger/logger_re_disasm_overview.md`
 - 进度监控（活文档）：`docs/logger/logger_progress.md`
 - 反编译素材清单与来源：`docs/logger/decompile_materials.md`
+- 数据页「练习量」子页（launcher，hmaker 移植）：`docs/logger/launcher_data_practice.md`
 
 **工作流与工具**
 

@@ -2,6 +2,7 @@
 #include "thprac_gui_locale.h"
 #include "thprac_launcher_cfg.h"
 #include "thprac_launcher_games.h"
+#include "thprac_launcher_data.h"
 #include "thprac_launcher_links.h"
 #include "thprac_launcher_tools.h"
 #include "thprac_launcher_others.h"
@@ -178,6 +179,13 @@ int GuiLauncherMain()
             if (GuiTabItem(S(THPRAC_GAMES))) {
                 ImGui::BeginChild("##games");
                 LauncherGamesGuiUpd();
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+                LauncherCloseHotkeyRebindListeners();
+            }
+            if (GuiTabItem(S(THPRAC_DATA))) {
+                ImGui::BeginChild("##data");
+                LauncherDataGuiUpd();
                 ImGui::EndChild();
                 ImGui::EndTabItem();
                 LauncherCloseHotkeyRebindListeners();
