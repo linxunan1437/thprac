@@ -338,7 +338,6 @@ struct PracticeStats {
     int64_t total = 0;
     int recordCount = 0;
     int dayCount = 0;
-    int64_t maxDaily = 0;
     std::vector<PracticeWeek> weeks;
 };
 
@@ -377,10 +376,6 @@ static void BuildStats(const std::vector<PracticeRecord>& records, const std::st
     }
 
     stats.dayCount = (int)days.size();
-    for (auto& [dayKey, day] : days) {
-        if (day.total > stats.maxDaily)
-            stats.maxDaily = day.total;
-    }
 
     std::map<int64_t, int64_t> weekTotals;
     std::map<int64_t, std::vector<int64_t>> weekDays;
@@ -428,6 +423,42 @@ static std::string CurrentMonthKey()
     SYSTEMTIME now {};
     GetLocalTime(&now);
     return std::format("{:04}{:02}", (unsigned)now.wYear, (unsigned)now.wMonth);
+}
+
+// 日练习量比例条：每 240 为一档，档内只画小数部分；>4 档封顶画满。
+static void DrawPracticeRatioBar(ImVec2 pos, float width, float ratio)
+{
+    constexpr float kBarHeight = 5.0f;
+    ImU32 background = 0;
+    ImU32 foreground = 0;
+    float fill = 0.0f;
+
+    if (ratio <= 1.0f) {
+        background = ImGui::GetColorU32(ImGuiCol_FrameBg);
+        foreground = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+        fill = std::clamp(ratio, 0.0f, 1.0f);
+    } else if (ratio <= 2.0f) {
+        background = IM_COL32(196, 168, 40, 255);
+        foreground = IM_COL32(90, 200, 90, 255);
+        fill = ratio - 1.0f;
+    } else if (ratio <= 3.0f) {
+        background = IM_COL32(80, 170, 80, 255);
+        foreground = IM_COL32(80, 140, 235, 255);
+        fill = ratio - 2.0f;
+    } else if (ratio <= 4.0f) {
+        background = IM_COL32(70, 110, 200, 255);
+        foreground = IM_COL32(240, 240, 240, 255);
+        fill = ratio - 3.0f;
+    } else {
+        background = IM_COL32(70, 110, 200, 255);
+        foreground = IM_COL32(240, 240, 240, 255);
+        fill = 1.0f;
+    }
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + kBarHeight), background, 2.5f);
+    if (fill > 0.0f)
+        drawList->AddRectFilled(pos, ImVec2(pos.x + width * fill, pos.y + kBarHeight), foreground, 2.5f);
 }
 
 // ---- 页面 ----------------------------------------------------------------
@@ -653,20 +684,12 @@ void PracticeTabGui::DrawDayRow(const PracticeDay& day)
         ImGui::SameLine();
     ImGui::TextUnformatted(amount.c_str());
 
-    float ratio = (mStats.maxDaily > 0) ? (float)day.total / (float)mStats.maxDaily : 0.0f;
-    ratio = std::clamp(ratio, 0.0f, 1.0f);
+    float ratio = (float)day.total / 240.0f;
 
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
     ImVec2 pos = ImGui::GetCursorScreenPos();
     float width = ImGui::GetContentRegionAvail().x;
-    constexpr float kBarHeight = 5.0f;
-    drawList->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + kBarHeight),
-        ImGui::GetColorU32(ImGuiCol_FrameBg), 2.5f);
-    if (ratio > 0.0f) {
-        drawList->AddRectFilled(pos, ImVec2(pos.x + width * ratio, pos.y + kBarHeight),
-            ImGui::GetColorU32(ImGuiCol_PlotHistogram), 2.5f);
-    }
-    ImGui::Dummy(ImVec2(width, kBarHeight + 6.0f));
+    DrawPracticeRatioBar(pos, width, ratio);
+    ImGui::Dummy(ImVec2(width, 11.0f));
 }
 
 } // namespace
