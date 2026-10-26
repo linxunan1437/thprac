@@ -723,12 +723,12 @@ void PracticeTabGui::DrawDayRow(const PracticeDay& day)
 // ---- 单过程 --------------------------------------------------------------
 // 与「练习量」共用同一批 logger_sessions_*.jsonl，但这里的口径面向「某一段
 // 起终点」的练习统计：一条日志 = 一次（或 total 次合并）练习。
-struct SingleRunEvent {
+struct SessionEvent {
     std::string type;
     std::string checkpoint;
 };
 
-struct SingleRunRecord {
+struct SessionRecord {
     std::string game;
     std::string start;
     std::string shot;
@@ -737,7 +737,7 @@ struct SingleRunRecord {
     int checkpointCount = 0;
     int total = 0;
     int got = 0;
-    std::vector<SingleRunEvent> events;
+    std::vector<SessionEvent> events;
 };
 
 static bool IsRunStartText(std::string_view text)
@@ -754,7 +754,7 @@ static bool IsRunStartText(std::string_view text)
     return ParseYmdPrefix(text, year, month, day);
 }
 
-static bool ParseSingleRunRecord(const char* text, size_t length, SingleRunRecord& record)
+static bool ParseSessionRecord(const char* text, size_t length, SessionRecord& record)
 {
     rapidjson::Document doc;
     doc.Parse(text, length);
@@ -805,7 +805,7 @@ static bool ParseSingleRunRecord(const char* text, size_t length, SingleRunRecor
             if (type == event.MemberEnd() || !type->value.IsString()
                 || checkpoint == event.MemberEnd() || !checkpoint->value.IsString())
                 continue;
-            record.events.push_back(SingleRunEvent {
+            record.events.push_back(SessionEvent {
                 std::string(type->value.GetString(), type->value.GetStringLength()),
                 std::string(checkpoint->value.GetString(), checkpoint->value.GetStringLength()) });
         }
@@ -813,8 +813,8 @@ static bool ParseSingleRunRecord(const char* text, size_t length, SingleRunRecor
     return true;
 }
 
-static void LoadSingleRunRecords(const std::wstring& dataDir, const std::vector<std::string>& months,
-    std::vector<SingleRunRecord>& records, bool& anyRead, bool& anyFailed)
+static void LoadRecentSessionRecords(const std::wstring& dataDir, const std::vector<std::string>& months,
+    std::vector<SessionRecord>& records, bool& anyRead, bool& anyFailed)
 {
     records.clear();
     anyRead = false;
@@ -823,8 +823,8 @@ static void LoadSingleRunRecords(const std::wstring& dataDir, const std::vector<
     const size_t monthCount = std::min<size_t>(3, months.size());
     for (size_t i = 0; i < monthCount; ++i) {
         bool read = ReadMonthLines(dataDir, months[i], [&](const char* text, size_t length) {
-            SingleRunRecord record;
-            if (ParseSingleRunRecord(text, length, record))
+            SessionRecord record;
+            if (ParseSessionRecord(text, length, record))
                 records.push_back(std::move(record));
         });
         if (read)
@@ -834,7 +834,24 @@ static void LoadSingleRunRecords(const std::wstring& dataDir, const std::vector<
     }
 
     // start 是定长本地时间字符串，字典序即时间序；三个文件合并后统一排序。
-    std::stable_sort(records.begin(), records.end(), [](const SingleRunRecord& a, const SingleRunRecord& b) {
+    std::stable_sort(records.begin(), records.end(), [](const SessionRecord& a, const SessionRecord& b) {
+        return a.start > b.start;
+    });
+}
+
+// 单卡页只读「所选月份」一个文件。与 LoadRecentSessionRecords() 共用同一
+// SessionRecord / ParseSessionRecord，避免两页对日志字段的口径漂移。
+static void LoadMonthSessionRecords(const std::wstring& dataDir, const std::string& month,
+    std::vector<SessionRecord>& records, bool& readFailed)
+{
+    records.clear();
+    readFailed = !ReadMonthLines(dataDir, month, [&](const char* text, size_t length) {
+        SessionRecord record;
+        if (ParseSessionRecord(text, length, record))
+            records.push_back(std::move(record));
+    });
+
+    std::stable_sort(records.begin(), records.end(), [](const SessionRecord& a, const SessionRecord& b) {
         return a.start > b.start;
     });
 }
@@ -1051,19 +1068,19 @@ static std::string LocalTimeMinusDays(int days)
     return text;
 }
 
-static std::vector<const SingleRunRecord*> FilterSingleRunRange(
-    const std::vector<const SingleRunRecord*>& hits, SingleRunRange range)
+static std::vector<const SessionRecord*> FilterSingleRunRange(
+    const std::vector<const SessionRecord*>& hits, SingleRunRange range)
 {
     if (range == SingleRunRange::All)
         return hits;
     if (range == SingleRunRange::Last10 || range == SingleRunRange::Last20) {
         const size_t count = std::min<size_t>(range == SingleRunRange::Last10 ? 10 : 20, hits.size());
-        return std::vector<const SingleRunRecord*>(hits.begin(), hits.begin() + count);
+        return std::vector<const SessionRecord*>(hits.begin(), hits.begin() + count);
     }
     const std::string cutoff = LocalTimeMinusDays(range == SingleRunRange::LastWeek ? 7 : 30);
     if (cutoff.empty())
         return {};
-    std::vector<const SingleRunRecord*> filtered;
+    std::vector<const SessionRecord*> filtered;
     filtered.reserve(hits.size());
     for (auto* record : hits) {
         if (record->start >= cutoff)
@@ -1072,7 +1089,7 @@ static std::vector<const SingleRunRecord*> FilterSingleRunRange(
     return filtered;
 }
 
-static std::vector<std::string> MissPoints(const SingleRunRecord& record)
+static std::vector<std::string> MissPoints(const SessionRecord& record)
 {
     std::vector<std::string> points;
     for (auto& event : record.events) {
@@ -1101,7 +1118,7 @@ struct SingleRunStats {
     std::vector<SingleRunChapterRate> rates;
 };
 
-static void ComputeSingleRunStats(const std::vector<const SingleRunRecord*>& filtered,
+static void ComputeSingleRunStats(const std::vector<const SessionRecord*>& filtered,
     const std::vector<std::string>& chapters, int startIndex, int endIndex, SingleRunStats& stats)
 {
     stats = {};
@@ -1223,7 +1240,7 @@ private:
 
     std::wstring mDataDir;
     std::vector<std::string> mMonths;
-    std::vector<SingleRunRecord> mRecords;
+    std::vector<SessionRecord> mRecords;
     std::vector<SingleRunConfig> mConfigs;
     std::vector<std::string> mCheckpoints;
     std::string mGame = "th14";
@@ -1231,8 +1248,8 @@ private:
     int mStartIndex = -1;
     int mEndIndex = -1;
     SingleRunRange mRange = SingleRunRange::Last20;
-    std::vector<const SingleRunRecord*> mHits;
-    std::vector<const SingleRunRecord*> mFiltered;
+    std::vector<const SessionRecord*> mHits;
+    std::vector<const SessionRecord*> mFiltered;
     SingleRunStats mStats;
 
     bool mConfigDialogRequested = false;
@@ -1295,7 +1312,7 @@ void SingleRunTabGui::Refresh()
 
     bool anyRead = false;
     bool anyFailed = false;
-    LoadSingleRunRecords(mDataDir, mMonths, mRecords, anyRead, anyFailed);
+    LoadRecentSessionRecords(mDataDir, mMonths, mRecords, anyRead, anyFailed);
     mReadFailed = anyFailed;
 
     if (!mGameChosen && !mRecords.empty()) {
@@ -1845,6 +1862,1211 @@ bool SingleRunTabGui::IsConfigNameTaken(const std::string& name, int ignoreIndex
 
 SingleRunTabGui gSingleRunTab;
 
+// ---- 单卡 ----------------------------------------------------------------
+// 与「单过程」共用同一批 logger_sessions_*.jsonl，但本页只读所选月份的
+// 一个文件，并把记录按 startCheckpoint 归到唯一章节，再按日聚合 total/got。
+struct SingleCardConfig {
+    std::string name;
+    std::string game;
+    std::string chapter;
+};
+
+static constexpr wchar_t kSingleCardConfigFileName[] = L"thprac_single_card_configs.json";
+
+static void LoadSingleCardConfigs(const std::wstring& dataDir, std::vector<SingleCardConfig>& configs)
+{
+    configs.clear();
+    if (dataDir.empty())
+        return;
+
+    std::wstring path = JoinDataDir(dataDir) + kSingleCardConfigFileName;
+    void* buffer = nullptr;
+    size_t size = 0;
+    if (!LoadJsonFile(path, buffer, size))
+        return;
+    std::unique_ptr<void, decltype(&free)> bufferGuard(buffer, &free);
+
+    const char* text = (const char*)buffer;
+    if (size >= 3 && (unsigned char)text[0] == 0xEF && (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF) {
+        text += 3;
+        size -= 3;
+    }
+
+    rapidjson::Document doc;
+    doc.Parse(text, size);
+    if (doc.HasParseError() || !doc.IsArray())
+        return;
+
+    for (auto& item : doc.GetArray()) {
+        if (!item.IsObject())
+            continue;
+        auto name = item.FindMember("name");
+        auto game = item.FindMember("game");
+        auto chapter = item.FindMember("chapter");
+        if (name == item.MemberEnd() || !name->value.IsString() || name->value.GetStringLength() == 0
+            || game == item.MemberEnd() || !game->value.IsString() || game->value.GetStringLength() == 0
+            || chapter == item.MemberEnd() || !chapter->value.IsString() || chapter->value.GetStringLength() == 0)
+            continue;
+
+        SingleCardConfig config;
+        config.name.assign(name->value.GetString(), name->value.GetStringLength());
+        config.game.assign(game->value.GetString(), game->value.GetStringLength());
+        config.chapter.assign(chapter->value.GetString(), chapter->value.GetStringLength());
+        configs.push_back(std::move(config));
+    }
+}
+
+static bool WriteSingleCardConfigs(const std::wstring& dataDir, const std::vector<SingleCardConfig>& configs)
+{
+    if (dataDir.empty())
+        return false;
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+    writer.SetIndent(' ', 4);
+    writer.StartArray();
+    for (auto& config : configs) {
+        writer.StartObject();
+        writer.Key("name");
+        writer.String(config.name.c_str(), (rapidjson::SizeType)config.name.size());
+        writer.Key("game");
+        writer.String(config.game.c_str(), (rapidjson::SizeType)config.game.size());
+        writer.Key("chapter");
+        writer.String(config.chapter.c_str(), (rapidjson::SizeType)config.chapter.size());
+        writer.EndObject();
+    }
+    writer.EndArray();
+
+    std::wstring path = JoinDataDir(dataDir) + kSingleCardConfigFileName;
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+
+    DWORD written = 0;
+    const DWORD length = (DWORD)buffer.GetSize();
+    const bool ok = WriteFile(file, buffer.GetString(), length, &written, nullptr) && written == length;
+    CloseHandle(file);
+    return ok;
+}
+
+static bool SessionHasAttemptEvent(const SessionRecord& record)
+{
+    for (auto& event : record.events) {
+        if (event.type != "interrupt")
+            return true;
+    }
+    return false;
+}
+
+static bool SessionHasInterruptEvent(const SessionRecord& record)
+{
+    for (auto& event : record.events) {
+        if (event.type == "interrupt")
+            return true;
+    }
+    return false;
+}
+
+// 与 thprac_games.cpp 的 GameSessionIsSingleChapter()（口径 13/16）保持一致。
+// total > 0 的记录由 logger 直接标记为单章节；旧行没有 total 时按同一判据复判。
+static bool IsSingleChapterSession(const SessionRecord& record)
+{
+    if (record.total > 0)
+        return true;
+    const bool onlyInterrupt = !record.events.empty() && !SessionHasAttemptEvent(record);
+    return (record.checkpointCount == 2 && SessionHasInterruptEvent(record))
+        || (record.checkpointCount == 1 && !onlyInterrupt);
+}
+
+struct SingleCardDay {
+    int64_t dayKey = 0;
+    int64_t total = 0;
+    int64_t got = 0;
+};
+
+static void BuildSingleCardDays(const std::vector<SessionRecord>& records, const std::string& game,
+    const std::string& chapter, std::vector<SingleCardDay>& days)
+{
+    days.clear();
+    std::map<int64_t, SingleCardDay> byDay;
+    for (auto& record : records) {
+        if (record.game != game || record.startCheckpoint != chapter)
+            continue;
+        if (!IsSingleChapterSession(record))
+            continue;
+
+        int year = 0, month = 0, day = 0;
+        if (!ParseYmdPrefix(record.start, year, month, day))
+            continue;
+
+        const int64_t total = record.total > 0 ? (int64_t)record.total : 1;
+        const int64_t got = record.total > 0
+            ? (int64_t)std::clamp(record.got, 0, record.total)
+            : (MissPoints(record).empty() ? 1 : 0);
+
+        const int64_t dayKey = DateKey(year, month, day);
+        auto& aggregate = byDay[dayKey];
+        aggregate.dayKey = dayKey;
+        aggregate.total += total;
+        aggregate.got += got;
+    }
+
+    days.reserve(byDay.size());
+    for (auto it = byDay.rbegin(); it != byDay.rend(); ++it)
+        days.push_back(it->second);
+}
+
+class SingleCardTabGui {
+public:
+    void Gui();
+
+private:
+    enum class ConfigDialogMode {
+        List,
+        Edit,
+    };
+
+    void EnsureInitialized();
+    void Refresh();
+    void SelectGame(const std::string& game);
+    void SelectMonth(const std::string& month);
+    void LoadSelectedMonth();
+    void LoadGameTable();
+    void SelectChapter(int index);
+    void RecomputeDays();
+    void DrawFilters();
+    void DrawDays();
+    void DrawConfigDialog();
+    void OpenConfigList();
+    void OpenConfigEditor(int index, bool returnToList);
+    void DrawConfigList();
+    void DrawConfigEditor();
+    void SaveConfigFromEditor();
+    void LoadConfig(int index);
+    void DeleteConfig(int index);
+    bool IsConfigNameTaken(const std::string& name, int ignoreIndex) const;
+
+    bool mInitialized = false;
+    bool mGameChosen = false;
+    bool mNoFiles = false;
+    bool mReadFailed = false;
+    bool mGameTableReady = false;
+    bool mFallback = false;
+
+    std::wstring mDataDir;
+    std::vector<std::string> mMonths;
+    std::string mSelectedMonth;
+    std::vector<SessionRecord> mRecords;
+    std::vector<SingleCardConfig> mConfigs;
+    std::vector<std::string> mCheckpoints;
+    std::string mGame = "th14";
+
+    int mChapterIndex = -1;
+    std::vector<SingleCardDay> mDays;
+
+    bool mConfigDialogRequested = false;
+    ConfigDialogMode mConfigDialogMode = ConfigDialogMode::List;
+    bool mConfigDialogReturnToList = false;
+    int mEditingConfigIndex = -1;
+    int mPendingDeleteIndex = -1;
+    char mConfigName[128] {};
+    char mConfigChapter[512] {};
+    std::string mConfigError;
+};
+
+void SingleCardTabGui::Gui()
+{
+    EnsureInitialized();
+
+    if (ImGui::Button(S(THPRAC_DATA_REFRESH)))
+        Refresh();
+    if (!mSelectedMonth.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", FormatMonthLabel(mSelectedMonth).c_str());
+    }
+    ImGui::Separator();
+
+    DrawFilters();
+    ImGui::Separator();
+
+    if (mNoFiles) {
+        ImGui::TextWrapped("%s", S(THPRAC_DATA_NO_FILE));
+    } else if (mRecords.empty() && mReadFailed) {
+        ImGui::TextWrapped("%s", S(THPRAC_DATA_READ_FAILED));
+    } else {
+        if (mReadFailed)
+            ImGui::TextDisabled("%s", S(THPRAC_DATA_READ_FAILED));
+        ImGui::BeginChild("##single_card_body", ImVec2(0.0f, 0.0f), false);
+        if (!mGameTableReady)
+            ImGui::TextWrapped("%s", S(THPRAC_DATA_SINGLE_RUN_TABLE_MISSING));
+        else if (mChapterIndex < 0)
+            ImGui::TextWrapped("%s", S(THPRAC_DATA_SINGLE_CARD_HINT));
+        else if (mDays.empty())
+            ImGui::TextWrapped("%s", S(THPRAC_DATA_SINGLE_CARD_EMPTY));
+        else
+            DrawDays();
+        ImGui::EndChild();
+    }
+
+    DrawConfigDialog();
+}
+
+void SingleCardTabGui::EnsureInitialized()
+{
+    if (mInitialized)
+        return;
+    mInitialized = true;
+    mDataDir = LauncherGetDataDir();
+    LoadSingleCardConfigs(mDataDir, mConfigs);
+    Refresh();
+}
+
+void SingleCardTabGui::Refresh()
+{
+    mDataDir = LauncherGetDataDir();
+    ListMonthFiles(mDataDir, mMonths);
+    mNoFiles = mMonths.empty();
+
+    mPendingDeleteIndex = -1;
+    mEditingConfigIndex = -1;
+    mConfigError.clear();
+
+    if (mNoFiles) {
+        mSelectedMonth.clear();
+        mFallback = false;
+    } else {
+        const std::string currentMonth = CurrentMonthKey();
+        const bool keepSelection = !mSelectedMonth.empty()
+            && std::find(mMonths.begin(), mMonths.end(), mSelectedMonth) != mMonths.end();
+        if (keepSelection) {
+            mFallback = false;
+        } else {
+            if (std::find(mMonths.begin(), mMonths.end(), currentMonth) != mMonths.end())
+                mSelectedMonth = currentMonth;
+            else
+                mSelectedMonth = mMonths.front();
+            mFallback = mSelectedMonth != currentMonth;
+        }
+    }
+
+    LoadSelectedMonth();
+}
+
+void SingleCardTabGui::SelectGame(const std::string& game)
+{
+    if (game == mGame)
+        return;
+    mGame = game;
+    mGameChosen = true;
+    mChapterIndex = -1;
+    mDays.clear();
+    mPendingDeleteIndex = -1;
+    mEditingConfigIndex = -1;
+    mConfigError.clear();
+    LoadGameTable();
+}
+
+void SingleCardTabGui::SelectMonth(const std::string& month)
+{
+    if (month == mSelectedMonth)
+        return;
+    mSelectedMonth = month;
+    mFallback = false;
+    LoadSelectedMonth();
+}
+
+void SingleCardTabGui::LoadSelectedMonth()
+{
+    mReadFailed = false;
+    if (mSelectedMonth.empty())
+        mRecords.clear();
+    else
+        LoadMonthSessionRecords(mDataDir, mSelectedMonth, mRecords, mReadFailed);
+
+    if (!mGameChosen && !mRecords.empty()) {
+        const std::string& newestGame = mRecords.front().game;
+        if (FindCheckpointSource(newestGame))
+            mGame = newestGame;
+        mGameChosen = true;
+    }
+    if (!FindCheckpointSource(mGame))
+        mGame = "th14";
+
+    LoadGameTable();
+    if (!mGameTableReady || mChapterIndex >= (int)mCheckpoints.size())
+        mChapterIndex = -1;
+    RecomputeDays();
+}
+
+void SingleCardTabGui::LoadGameTable()
+{
+    mCheckpoints.clear();
+    mGameTableReady = false;
+    const CheckpointSource* source = FindCheckpointSource(mGame);
+    if (!source)
+        return;
+    mGameTableReady = LoadCheckpointNames(source->csv, mCheckpoints);
+    if (!mGameTableReady)
+        mCheckpoints.clear();
+}
+
+void SingleCardTabGui::SelectChapter(int index)
+{
+    mChapterIndex = index;
+    RecomputeDays();
+}
+
+void SingleCardTabGui::RecomputeDays()
+{
+    mDays.clear();
+    if (!mGameTableReady || mChapterIndex < 0 || mChapterIndex >= (int)mCheckpoints.size())
+        return;
+    BuildSingleCardDays(mRecords, mGame, mCheckpoints[mChapterIndex], mDays);
+}
+
+void SingleCardTabGui::DrawFilters()
+{
+    ImGui::TextUnformatted(S(THPRAC_GAMES));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(300.0f);
+    if (ImGui::BeginCombo("##single_card_game", GameDisplayName(mGame.c_str()))) {
+        for (auto& source : kCheckpointSources) {
+            const bool selected = mGame == source.game;
+            if (ImGui::Selectable(GameDisplayName(source.game), selected))
+                SelectGame(source.game);
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted(S(THPRAC_DATA_MONTH));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
+    std::string monthPreview = FormatMonthLabel(mSelectedMonth);
+    if (ImGui::BeginCombo("##single_card_month", monthPreview.c_str())) {
+        for (auto& month : mMonths) {
+            const bool selected = month == mSelectedMonth;
+            std::string label = FormatMonthLabel(month);
+            if (ImGui::Selectable(label.c_str(), selected))
+                SelectMonth(month);
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::TextUnformatted(S(TH_CHAPTER));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(420.0f);
+    const char* chapterPreview = (mChapterIndex >= 0 && mChapterIndex < (int)mCheckpoints.size())
+        ? mCheckpoints[mChapterIndex].c_str()
+        : S(THPRAC_DATA_SINGLE_RUN_NOT_SELECTED);
+    if (ImGui::BeginCombo("##single_card_chapter", chapterPreview)) {
+        for (int i = 0; i < (int)mCheckpoints.size(); ++i) {
+            const bool selected = mChapterIndex == i;
+            if (ImGui::Selectable(mCheckpoints[i].c_str(), selected))
+                SelectChapter(i);
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::SameLine();
+    if (!mGameTableReady) {
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+        ImGui::Button(S(THPRAC_DATA_SINGLE_RUN_CONFIG_SAVE));
+        ImGui::PopStyleVar();
+    } else if (ImGui::Button(S(THPRAC_DATA_SINGLE_RUN_CONFIG_SAVE))) {
+        OpenConfigEditor(-1, false);
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button(S(THPRAC_DATA_SINGLE_RUN_CONFIG_LIST)))
+        OpenConfigList();
+
+    if (mFallback) {
+        std::string monthLabel = FormatMonthLabel(mSelectedMonth);
+        ImGui::TextDisabled(S(THPRAC_DATA_PRACTICE_FALLBACK), monthLabel.c_str());
+    }
+    if (!mGameTableReady && !mNoFiles)
+        ImGui::TextWrapped("%s", S(THPRAC_DATA_SINGLE_RUN_TABLE_MISSING));
+}
+
+void SingleCardTabGui::DrawDays()
+{
+    if (ImGui::BeginTable("##single_card_days", 4,
+            ImGuiTableFlags_::ImGuiTableFlags_RowBg | ImGuiTableFlags_::ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn(S(THPRAC_GAME_TIME_DATE), ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(S(THPRAC_DATA_SINGLE_CARD_TOTAL), ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthFixed, 120.0f);
+        ImGui::TableSetupColumn(S(THPRAC_DATA_SINGLE_CARD_GOT), ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthFixed, 120.0f);
+        ImGui::TableSetupColumn(S(THPRAC_DATA_SINGLE_CARD_RATE), ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthFixed, 120.0f);
+        ImGui::TableHeadersRow();
+        for (auto& day : mDays) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(FormatDate(day.dayKey).c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(FormatAmount(day.total).c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(FormatAmount(day.got).c_str());
+            ImGui::TableNextColumn();
+            if (day.total > 0)
+                ImGui::Text("%.2f%%", (double)day.got * 100.0 / (double)day.total);
+            else
+                ImGui::TextUnformatted("—");
+        }
+        ImGui::EndTable();
+    }
+}
+
+void SingleCardTabGui::OpenConfigList()
+{
+    mConfigDialogMode = ConfigDialogMode::List;
+    mConfigDialogReturnToList = false;
+    mEditingConfigIndex = -1;
+    mPendingDeleteIndex = -1;
+    mConfigError.clear();
+    mConfigDialogRequested = true;
+}
+
+void SingleCardTabGui::OpenConfigEditor(int index, bool returnToList)
+{
+    mConfigDialogMode = ConfigDialogMode::Edit;
+    mConfigDialogReturnToList = returnToList;
+    mEditingConfigIndex = index;
+    mPendingDeleteIndex = -1;
+    mConfigError.clear();
+
+    if (index >= 0 && index < (int)mConfigs.size() && mConfigs[index].game == mGame) {
+        const SingleCardConfig& config = mConfigs[index];
+        CopyTextBuffer(mConfigName, config.name);
+        CopyTextBuffer(mConfigChapter, config.chapter);
+    } else {
+        mEditingConfigIndex = -1;
+        mConfigName[0] = '\0';
+        CopyTextBuffer(mConfigChapter, mChapterIndex >= 0 && mChapterIndex < (int)mCheckpoints.size()
+                ? mCheckpoints[mChapterIndex]
+                : std::string());
+    }
+    mConfigDialogRequested = true;
+}
+
+void SingleCardTabGui::DrawConfigDialog()
+{
+    constexpr const char* kPopupId = "###single_card_config";
+    if (mConfigDialogRequested) {
+        if (!ImGui::IsPopupOpen(kPopupId))
+            ImGui::OpenPopup(kPopupId);
+        mConfigDialogRequested = false;
+    }
+
+    const bool editingExisting = mConfigDialogMode == ConfigDialogMode::Edit && mEditingConfigIndex >= 0;
+    const char* titleKey = mConfigDialogMode == ConfigDialogMode::List
+        ? S(THPRAC_DATA_SINGLE_RUN_CONFIG_LIST)
+        : (editingExisting ? S(THPRAC_DATA_SINGLE_RUN_CONFIG_EDIT) : S(THPRAC_DATA_SINGLE_RUN_CONFIG_SAVE));
+    std::string title = std::string(titleKey) + kPopupId;
+    if (ImGui::BeginPopupModal(title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (mConfigDialogMode == ConfigDialogMode::List)
+            DrawConfigList();
+        else
+            DrawConfigEditor();
+        ImGui::EndPopup();
+    }
+}
+
+void SingleCardTabGui::DrawConfigList()
+{
+    ImGui::TextDisabled("%s: %s", S(THPRAC_GAMES), GameDisplayName(mGame.c_str()));
+    ImGui::Separator();
+
+    ImGui::BeginChild("##single_card_config_list", ImVec2(520.0f, 300.0f), true);
+    if (mPendingDeleteIndex >= 0 && mPendingDeleteIndex < (int)mConfigs.size()) {
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), S(THPRAC_DATA_SINGLE_RUN_CONFIG_DELETE_CONFIRM),
+            mConfigs[mPendingDeleteIndex].name.c_str());
+        ImGui::Separator();
+    }
+
+    int visibleCount = 0;
+    if (ImGui::BeginTable("##single_card_config_rows", 3, ImGuiTableFlags_::ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("##chapter", ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthFixed, 190.0f);
+        for (int i = 0; i < (int)mConfigs.size(); ++i) {
+            const SingleCardConfig& config = mConfigs[i];
+            if (config.game != mGame)
+                continue;
+            ++visibleCount;
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(config.name.c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(config.chapter.c_str());
+            ImGui::TableNextColumn();
+            if (mPendingDeleteIndex == i) {
+                if (ImGui::SmallButton(S(THPRAC_GAMES_DELETE))) {
+                    DeleteConfig(i);
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton(S(THPRAC_CANCEL)))
+                    mPendingDeleteIndex = -1;
+            } else {
+                if (ImGui::SmallButton(S(THPRAC_DATA_SINGLE_RUN_CONFIG_LOAD))) {
+                    LoadConfig(i);
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton(S(THPRAC_DATA_SINGLE_RUN_CONFIG_EDIT_ACTION)))
+                    OpenConfigEditor(i, true);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(S(THPRAC_GAMES_DELETE)))
+                    mPendingDeleteIndex = i;
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (visibleCount == 0)
+        ImGui::TextDisabled("%s", S(THPRAC_DATA_SINGLE_RUN_CONFIG_EMPTY));
+    if (!mConfigError.empty())
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s", mConfigError.c_str());
+    ImGui::EndChild();
+
+    if (ImGui::Button(S(THPRAC_DATA_SINGLE_RUN_CONFIG_NEW)))
+        OpenConfigEditor(-1, true);
+    ImGui::SameLine();
+    if (ImGui::Button(S(THPRAC_CLOSE)))
+        ImGui::CloseCurrentPopup();
+}
+
+void SingleCardTabGui::DrawConfigEditor()
+{
+    ImGui::TextDisabled("%s: %s", S(THPRAC_GAMES), GameDisplayName(mGame.c_str()));
+    ImGui::Separator();
+
+    ImGui::TextUnformatted(S(THPRAC_DATA_SINGLE_RUN_CONFIG_NAME));
+    ImGui::SameLine(140.0f);
+    ImGui::SetNextItemWidth(380.0f);
+    ImGui::InputText("##single_card_config_name", mConfigName, sizeof(mConfigName));
+
+    ImGui::TextUnformatted(S(TH_CHAPTER));
+    ImGui::SameLine(140.0f);
+    ImGui::SetNextItemWidth(380.0f);
+    ImGui::InputText("##single_card_config_chapter", mConfigChapter, sizeof(mConfigChapter));
+
+    if (!mConfigError.empty())
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s", mConfigError.c_str());
+
+    if (ImGui::Button(S(THPRAC_DATA_SINGLE_RUN_CONFIG_SAVE_ACTION)))
+        SaveConfigFromEditor();
+    ImGui::SameLine();
+    if (ImGui::Button(S(THPRAC_CANCEL))) {
+        if (mConfigDialogReturnToList) {
+            mConfigDialogMode = ConfigDialogMode::List;
+            mEditingConfigIndex = -1;
+            mConfigError.clear();
+        } else {
+            ImGui::CloseCurrentPopup();
+        }
+    }
+}
+
+void SingleCardTabGui::SaveConfigFromEditor()
+{
+    const std::string name = TrimText(mConfigName);
+    const std::string chapter = TrimText(mConfigChapter);
+    if (name.empty()) {
+        mConfigError = S(THPRAC_LINKS_EDIT_ERR_NAME);
+        return;
+    }
+    if (IsConfigNameTaken(name, mEditingConfigIndex)) {
+        mConfigError = S(THPRAC_DATA_SINGLE_RUN_CONFIG_ERR_DUP);
+        return;
+    }
+    if (FindCheckpointIndex(mCheckpoints, chapter, false) < 0) {
+        mConfigError = S(THPRAC_DATA_SINGLE_CARD_CONFIG_ERR_CHAPTER);
+        return;
+    }
+
+    std::vector<SingleCardConfig> next = mConfigs;
+    SingleCardConfig config { name, mGame, chapter };
+    if (mEditingConfigIndex >= 0 && mEditingConfigIndex < (int)next.size()
+        && next[mEditingConfigIndex].game == mGame) {
+        next[mEditingConfigIndex] = std::move(config);
+    } else {
+        next.push_back(std::move(config));
+    }
+    if (!WriteSingleCardConfigs(mDataDir, next)) {
+        mConfigError = S(THPRAC_DATA_SINGLE_RUN_CONFIG_WRITE_FAILED);
+        return;
+    }
+    mConfigs = std::move(next);
+    mEditingConfigIndex = -1;
+    mConfigError.clear();
+    if (mConfigDialogReturnToList)
+        mConfigDialogMode = ConfigDialogMode::List;
+    else
+        ImGui::CloseCurrentPopup();
+}
+
+void SingleCardTabGui::LoadConfig(int index)
+{
+    if (index < 0 || index >= (int)mConfigs.size())
+        return;
+    const SingleCardConfig& config = mConfigs[index];
+    if (config.game != mGame)
+        return;
+    const int chapterIndex = FindCheckpointIndex(mCheckpoints, config.chapter, false);
+    if (chapterIndex < 0) {
+        mConfigError = S(THPRAC_DATA_SINGLE_CARD_CONFIG_ERR_CHAPTER);
+        return;
+    }
+    mChapterIndex = chapterIndex;
+    mPendingDeleteIndex = -1;
+    mConfigError.clear();
+    RecomputeDays();
+    ImGui::CloseCurrentPopup();
+}
+
+void SingleCardTabGui::DeleteConfig(int index)
+{
+    if (index < 0 || index >= (int)mConfigs.size())
+        return;
+    std::vector<SingleCardConfig> next = mConfigs;
+    next.erase(next.begin() + index);
+    if (!WriteSingleCardConfigs(mDataDir, next)) {
+        mConfigError = S(THPRAC_DATA_SINGLE_RUN_CONFIG_WRITE_FAILED);
+        return;
+    }
+    mConfigs = std::move(next);
+    mPendingDeleteIndex = -1;
+    mEditingConfigIndex = -1;
+    mConfigError.clear();
+}
+
+bool SingleCardTabGui::IsConfigNameTaken(const std::string& name, int ignoreIndex) const
+{
+    for (int i = 0; i < (int)mConfigs.size(); ++i) {
+        if (i == ignoreIndex)
+            continue;
+        if (mConfigs[i].game == mGame && mConfigs[i].name == name)
+            return true;
+    }
+    return false;
+}
+
+SingleCardTabGui gSingleCardTab;
+
+// ---- 全关 ----------------------------------------------------------------
+// 全关判定与 hmaker 全关页一致：起点 = checkpoint 表第一条记录名，
+// 终点 = 表中最后一条以 "ST6" 开头的记录名（行序最后，不是字符串排序）。
+struct FullRunTable {
+    std::vector<std::string> names;
+    std::string first;
+    std::vector<std::string> endCheckpoints;
+    bool valid = false;
+};
+
+// th16 的 ST6 末尾有 SPRING/SUMMER/AUTUMN/WINTER 四个最终关，均可作为全关终点；
+// 其余作品仍只取行序最后一条 ST6。
+static constexpr int kTh16FullRunEndCount = 4;
+
+static bool LoadFullRunTable(const std::string& game, FullRunTable& table)
+{
+    table = {};
+    const CheckpointSource* source = FindCheckpointSource(game);
+    if (!source || !LoadCheckpointNames(source->csv, table.names) || table.names.empty())
+        return false;
+
+    table.first = table.names.front();
+    const int endCount = game == "th16" ? kTh16FullRunEndCount : 1;
+    for (auto it = table.names.rbegin(); it != table.names.rend()
+         && (int)table.endCheckpoints.size() < endCount; ++it) {
+        if (it->compare(0, 3, "ST6") != 0)
+            continue;
+        if (std::find(table.endCheckpoints.begin(), table.endCheckpoints.end(), *it) == table.endCheckpoints.end())
+            table.endCheckpoints.push_back(*it);
+    }
+    table.valid = !table.first.empty() && !table.endCheckpoints.empty();
+    return table.valid;
+}
+
+static bool IsFullRunRecord(const SessionRecord& record, const FullRunTable& table)
+{
+    return table.valid
+        && record.startCheckpoint == table.first
+        && std::find(table.endCheckpoints.begin(), table.endCheckpoints.end(), record.endCheckpoint) != table.endCheckpoints.end();
+}
+
+static void BuildFullRunGameList(const std::vector<const SessionRecord*>& records,
+    std::vector<std::string>& gameIds)
+{
+    std::set<std::string> present;
+    for (auto* record : records)
+        present.insert(record->game);
+
+    gameIds.clear();
+    for (auto& gameDef : gGameDefs) {
+        auto it = present.find(gameDef.idStr);
+        if (it != present.end()) {
+            gameIds.push_back(*it);
+            present.erase(it);
+        }
+    }
+    gameIds.insert(gameIds.end(), present.begin(), present.end());
+}
+
+struct FullRunChapterRate {
+    std::string name;
+    double rate = 0.0;
+};
+
+struct FullRunDay {
+    int64_t dayKey = 0;
+    std::vector<const SessionRecord*> records;
+};
+
+struct FullRunStats {
+    int recordCount = 0;
+    int totalEvents = 0;
+    double avgMiss = 0.0;
+    double totalRate = 100.0;
+    std::vector<FullRunChapterRate> chapterRates;
+    std::vector<FullRunDay> days;
+};
+
+// 通过率按「该章节出过 event 的记录数」计：同一局同一章节多个 event 只算一次失败。
+static void BuildFullRunStats(const std::vector<const SessionRecord*>& records,
+    const std::vector<std::string>& chapters, FullRunStats& stats)
+{
+    stats = {};
+    stats.recordCount = (int)records.size();
+
+    std::map<std::string, int> hitCounts;
+    for (auto* record : records) {
+        stats.totalEvents += (int)record->events.size();
+        std::set<std::string> hit;
+        for (auto& event : record->events) {
+            if (!event.checkpoint.empty())
+                hit.insert(event.checkpoint);
+        }
+        for (auto& name : hit)
+            ++hitCounts[name];
+    }
+    stats.avgMiss = stats.recordCount == 0
+        ? 0.0
+        : (double)stats.totalEvents / (double)stats.recordCount;
+
+    for (auto& name : chapters) {
+        auto it = hitCounts.find(name);
+        if (it == hitCounts.end())
+            continue;
+        const double rate = (double)(stats.recordCount - it->second) * 100.0 / (double)stats.recordCount;
+        stats.chapterRates.push_back({ name, rate });
+        hitCounts.erase(it);
+    }
+    for (auto& [name, hitCount] : hitCounts) {
+        const double rate = (double)(stats.recordCount - hitCount) * 100.0 / (double)stats.recordCount;
+        stats.chapterRates.push_back({ name, rate });
+    }
+
+    stats.totalRate = 100.0;
+    for (auto& rate : stats.chapterRates)
+        stats.totalRate *= rate.rate / 100.0;
+
+    for (auto* record : records) {
+        int year = 0, month = 0, day = 0;
+        if (!ParseYmdPrefix(record->start, year, month, day))
+            continue;
+        const int64_t dayKey = DateKey(year, month, day);
+        if (stats.days.empty() || stats.days.back().dayKey != dayKey)
+            stats.days.push_back({ dayKey, {} });
+        stats.days.back().records.push_back(record);
+    }
+}
+
+static std::string FullRunEventText(const SessionRecord& record)
+{
+    std::string text;
+    for (auto& event : record.events) {
+        if (event.type.empty() && event.checkpoint.empty())
+            continue;
+        if (!text.empty())
+            text += "  |  ";
+        if (!event.type.empty()) {
+            text += event.type;
+            if (!event.checkpoint.empty())
+                text += ": ";
+        }
+        text += event.checkpoint;
+    }
+    return text;
+}
+
+class FullRunTabGui {
+public:
+    void Gui();
+
+private:
+    void EnsureInitialized();
+    void Refresh();
+    void LoadSelectedMonth();
+    void BuildFullRuns();
+    void SelectGame(const std::string& game);
+    void SelectMonth(const std::string& month);
+    void RebuildStats();
+    void DrawHeader();
+    void DrawFilters();
+    void DrawDays();
+    void DrawRecord(const SessionRecord& record);
+    void DrawPassRateDialog();
+
+    bool mInitialized = false;
+    bool mNoFiles = false;
+    bool mReadFailed = false;
+    bool mFallback = false;
+    bool mPassRateDialogRequested = false;
+
+    std::wstring mDataDir;
+    std::vector<std::string> mMonths;
+    std::string mSelectedMonth;
+    std::string mSelectedGame;
+    std::vector<SessionRecord> mMonthRecords;
+    std::vector<const SessionRecord*> mFullRuns;
+    std::vector<const SessionRecord*> mFiltered;
+    std::vector<std::string> mGameIds;
+    std::vector<std::string> mChapterNames;
+    FullRunStats mStats;
+};
+
+FullRunTabGui gFullRunTab;
+
+void FullRunTabGui::Gui()
+{
+    EnsureInitialized();
+
+    DrawHeader();
+    if (!mNoFiles)
+        DrawFilters();
+    ImGui::Separator();
+
+    if (mNoFiles) {
+        ImGui::TextWrapped("%s", S(THPRAC_DATA_NO_FILE));
+    } else if (mMonthRecords.empty() && mReadFailed) {
+        ImGui::TextWrapped("%s", S(THPRAC_DATA_READ_FAILED));
+    } else {
+        if (mReadFailed)
+            ImGui::TextDisabled("%s", S(THPRAC_DATA_READ_FAILED));
+        if (mFullRuns.empty())
+            ImGui::TextWrapped("%s", S(THPRAC_DATA_FULL_RUN_EMPTY_MONTH));
+        else if (mFiltered.empty())
+            ImGui::TextWrapped("%s", S(THPRAC_DATA_FULL_RUN_EMPTY_FILTER));
+        else {
+            ImGui::BeginChild("##full_run_body", ImVec2(0.0f, 0.0f), false);
+            DrawDays();
+            ImGui::EndChild();
+        }
+    }
+
+    DrawPassRateDialog();
+}
+
+void FullRunTabGui::EnsureInitialized()
+{
+    if (mInitialized)
+        return;
+    mInitialized = true;
+    mDataDir = LauncherGetDataDir();
+    Refresh();
+}
+
+void FullRunTabGui::Refresh()
+{
+    mDataDir = LauncherGetDataDir();
+    ListMonthFiles(mDataDir, mMonths);
+    mNoFiles = mMonths.empty();
+    if (mNoFiles) {
+        mSelectedMonth.clear();
+        mSelectedGame.clear();
+        mMonthRecords.clear();
+        mFullRuns.clear();
+        mFiltered.clear();
+        mGameIds.clear();
+        mChapterNames.clear();
+        mStats = {};
+        mReadFailed = false;
+        mFallback = false;
+        return;
+    }
+
+    const std::string currentMonth = CurrentMonthKey();
+    const bool keepSelection = !mSelectedMonth.empty()
+        && std::find(mMonths.begin(), mMonths.end(), mSelectedMonth) != mMonths.end();
+    if (keepSelection) {
+        mFallback = false;
+    } else {
+        if (std::find(mMonths.begin(), mMonths.end(), currentMonth) != mMonths.end())
+            mSelectedMonth = currentMonth;
+        else
+            mSelectedMonth = mMonths.front();
+        mFallback = mSelectedMonth != currentMonth;
+    }
+
+    LoadSelectedMonth();
+}
+
+void FullRunTabGui::LoadSelectedMonth()
+{
+    mFullRuns.clear();
+    mFiltered.clear();
+    mChapterNames.clear();
+    mStats = {};
+    mReadFailed = false;
+    if (mSelectedMonth.empty())
+        mMonthRecords.clear();
+    else
+        LoadMonthSessionRecords(mDataDir, mSelectedMonth, mMonthRecords, mReadFailed);
+
+    BuildFullRuns();
+    if (!mSelectedGame.empty()
+        && std::find(mGameIds.begin(), mGameIds.end(), mSelectedGame) == mGameIds.end())
+        mSelectedGame.clear();
+    RebuildStats();
+}
+
+void FullRunTabGui::BuildFullRuns()
+{
+    mFullRuns.clear();
+    mGameIds.clear();
+
+    std::map<std::string, FullRunTable> tables;
+    for (auto& record : mMonthRecords) {
+        auto it = tables.find(record.game);
+        if (it == tables.end()) {
+            FullRunTable table;
+            LoadFullRunTable(record.game, table);
+            it = tables.emplace(record.game, std::move(table)).first;
+        }
+        if (IsFullRunRecord(record, it->second))
+            mFullRuns.push_back(&record);
+    }
+    BuildFullRunGameList(mFullRuns, mGameIds);
+}
+
+void FullRunTabGui::SelectGame(const std::string& game)
+{
+    if (game == mSelectedGame)
+        return;
+    mSelectedGame = game;
+    RebuildStats();
+}
+
+void FullRunTabGui::SelectMonth(const std::string& month)
+{
+    if (month == mSelectedMonth)
+        return;
+    mSelectedMonth = month;
+    mFallback = false;
+    LoadSelectedMonth();
+}
+
+void FullRunTabGui::RebuildStats()
+{
+    mFiltered.clear();
+    for (auto* record : mFullRuns) {
+        if (mSelectedGame.empty() || record->game == mSelectedGame)
+            mFiltered.push_back(record);
+    }
+
+    mChapterNames.clear();
+    if (!mSelectedGame.empty()) {
+        const CheckpointSource* source = FindCheckpointSource(mSelectedGame);
+        if (source)
+            LoadCheckpointNames(source->csv, mChapterNames);
+    }
+    BuildFullRunStats(mFiltered, mChapterNames, mStats);
+}
+
+void FullRunTabGui::DrawHeader()
+{
+    if (ImGui::Button(S(THPRAC_DATA_REFRESH)))
+        Refresh();
+    ImGui::SameLine();
+    if (!mSelectedMonth.empty())
+        ImGui::TextDisabled("%s", FormatMonthLabel(mSelectedMonth).c_str());
+
+    if (!mSelectedGame.empty()) {
+        char recordText[128] {};
+        std::snprintf(recordText, sizeof(recordText), "%s: %d",
+            S(THPRAC_DATA_FULL_RUN_RECORD_COUNT), mStats.recordCount);
+        char avgText[128] {};
+        std::snprintf(avgText, sizeof(avgText), "%s: %.2f",
+            S(THPRAC_DATA_FULL_RUN_AVG_MISS), mStats.avgMiss);
+        const char* buttonText = S(THPRAC_DATA_FULL_RUN_PASS_RATE);
+        const float spacing = ImGui::GetStyle().ItemSpacing.x;
+        const float statsWidth = ImGui::CalcTextSize(recordText).x
+            + ImGui::CalcTextSize(avgText).x
+            + ImGui::CalcTextSize(buttonText).x
+            + ImGui::GetStyle().FramePadding.x * 2.0f
+            + spacing * 4.0f;
+        const float right = ImGui::GetContentRegionMax().x - statsWidth;
+        if (right > ImGui::GetCursorPosX())
+            ImGui::SameLine(right);
+        else
+            ImGui::SameLine();
+        ImGui::TextUnformatted(recordText);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(avgText);
+        ImGui::SameLine();
+        if (mStats.recordCount == 0) {
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+            ImGui::Button(buttonText);
+            ImGui::PopStyleVar();
+        } else if (ImGui::Button(buttonText)) {
+            mPassRateDialogRequested = true;
+        }
+    }
+}
+
+void FullRunTabGui::DrawFilters()
+{
+    ImGui::TextUnformatted(S(THPRAC_GAMES));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(240.0f);
+    const char* gamePreview = mSelectedGame.empty()
+        ? S(THPRAC_GAME_TIME_ALL)
+        : GameDisplayName(mSelectedGame.c_str());
+    if (ImGui::BeginCombo("##full_run_game", gamePreview)) {
+        if (ImGui::Selectable(S(THPRAC_GAME_TIME_ALL), mSelectedGame.empty()))
+            SelectGame(std::string());
+        for (auto& gameId : mGameIds) {
+            const bool selected = gameId == mSelectedGame;
+            if (ImGui::Selectable(GameDisplayName(gameId.c_str()), selected))
+                SelectGame(gameId);
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted(S(THPRAC_DATA_MONTH));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
+    std::string monthPreview = FormatMonthLabel(mSelectedMonth);
+    if (ImGui::BeginCombo("##full_run_month", monthPreview.c_str())) {
+        for (auto& month : mMonths) {
+            const bool selected = month == mSelectedMonth;
+            std::string label = FormatMonthLabel(month);
+            if (ImGui::Selectable(label.c_str(), selected))
+                SelectMonth(month);
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    if (mFallback) {
+        std::string monthLabel = FormatMonthLabel(mSelectedMonth);
+        ImGui::TextDisabled(S(THPRAC_DATA_PRACTICE_FALLBACK), monthLabel.c_str());
+    }
+}
+
+void FullRunTabGui::DrawDays()
+{
+    for (size_t i = 0; i < mStats.days.size(); ++i) {
+        auto& day = mStats.days[i];
+        SysDays date { std::chrono::days { day.dayKey } };
+        int isoWeekday = (int)std::chrono::weekday { date }.iso_encoding();
+        std::string dateLabel = std::format("{} {}", FormatDate(day.dayKey), WeekdayName(isoWeekday));
+
+        ImGui::PushID((int)i);
+        ImGui::TextUnformatted(dateLabel.c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled(S(THPRAC_DATA_PRACTICE_DAY_COUNT), (int)day.records.size());
+        ImGui::Separator();
+
+        ImGui::Indent(12.0f);
+        for (auto* record : day.records)
+            DrawRecord(*record);
+        ImGui::Unindent(12.0f);
+
+        ImGui::Spacing();
+        ImGui::PopID();
+    }
+}
+
+void FullRunTabGui::DrawRecord(const SessionRecord& record)
+{
+    ImGui::TextUnformatted(GameDisplayName(record.game.c_str()));
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", record.start.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled(S(THPRAC_DATA_FULL_RUN_EVENT_COUNT), (int)record.events.size());
+
+    ImGui::Indent(12.0f);
+    const std::string events = FullRunEventText(record);
+    if (events.empty())
+        ImGui::TextDisabled("%s", S(THPRAC_DATA_FULL_RUN_NO_EVENT));
+    else
+        ImGui::TextWrapped("%s", events.c_str());
+    ImGui::Unindent(12.0f);
+    ImGui::Spacing();
+}
+
+void FullRunTabGui::DrawPassRateDialog()
+{
+    constexpr const char* kPopupId = "###full_run_pass_rate";
+    if (mPassRateDialogRequested) {
+        if (!ImGui::IsPopupOpen(kPopupId))
+            ImGui::OpenPopup(kPopupId);
+        mPassRateDialogRequested = false;
+    }
+
+    std::string title = std::string(S(THPRAC_DATA_FULL_RUN_PASS_RATE)) + kPopupId;
+    if (ImGui::BeginPopupModal(title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextDisabled("%s: %s", S(THPRAC_GAMES), GameDisplayName(mSelectedGame.c_str()));
+        ImGui::Text("%s: %d", S(THPRAC_DATA_FULL_RUN_RECORD_COUNT), mStats.recordCount);
+        ImGui::Text("%s: %.2f", S(THPRAC_DATA_FULL_RUN_AVG_MISS), mStats.avgMiss);
+        ImGui::Separator();
+        ImGui::TextUnformatted(S(THPRAC_DATA_SINGLE_RUN_CHAPTER_RATES));
+
+        ImGui::BeginChild("##full_run_rate_list", ImVec2(560.0f, 360.0f), true);
+        if (mStats.chapterRates.empty()) {
+            ImGui::TextDisabled("%s", S(THPRAC_DATA_FULL_RUN_NO_EVENT));
+        } else if (ImGui::BeginTable("##full_run_rates", 3,
+                       ImGuiTableFlags_::ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_::ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("##name", ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthFixed, 300.0f);
+            ImGui::TableSetupColumn("##bar", ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("##rate", ImGuiTableColumnFlags_::ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            for (auto& rate : mStats.chapterRates) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(rate.name.c_str());
+                ImGui::TableNextColumn();
+                ImGui::ProgressBar((float)std::clamp(rate.rate / 100.0, 0.0, 1.0), ImVec2(-1.0f, 6.0f), "");
+                ImGui::TableNextColumn();
+                ImGui::Text("%.2f%%", rate.rate);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndChild();
+
+        ImGui::Separator();
+        ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram),
+            "%s: %.2f%%", S(THPRAC_DATA_FULL_RUN_TOTAL_PASS_RATE), mStats.totalRate);
+        if (ImGui::Button(S(THPRAC_CLOSE)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+}
+
 } // namespace
 
 bool LauncherDataGuiUpd()
@@ -1855,6 +3077,7 @@ bool LauncherDataGuiUpd()
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem(S(THPRAC_DATA_FULL_RUN))) {
+            gFullRunTab.Gui();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem(S(THPRAC_DATA_SINGLE_RUN))) {
@@ -1862,6 +3085,7 @@ bool LauncherDataGuiUpd()
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem(S(THPRAC_DATA_SINGLE_CARD))) {
+            gSingleCardTab.Gui();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

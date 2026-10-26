@@ -182,3 +182,4 @@ NN数       = clean
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-24 | 建档：实现 launcher「数据 → 单过程」；按 game + 起终点精确匹配最近 3 个月日志，五档范围统计与明细；`interrupt` 不计 miss、`total`/`got` 展开；新增保存配置 / 配置列表 / 编辑 / 删除，配置落盘 `thprac_single_run_configs.json` 且**列表按当前作品过滤**；新增 32 条 locale。**Release\|x86 编译通过。** |
+| 2026-10-24 | 记录结构/解析器抽成共享的 `SessionRecord` / `SessionEvent` / `ParseSessionRecord`，供「单卡」页复用；单过程读取逻辑不变（仍取最近 3 个月文件），新增 `LoadMonthSessionRecords()` 给单卡页按所选月份读取。**无行为变化。** |

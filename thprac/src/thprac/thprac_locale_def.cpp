@@ -7,7 +7,7 @@
 
 namespace THPrac {
 
-const char* th_glossary_str[3][1932] {
+const char* th_glossary_str[3][1946] {
     {
         "",
         "啤酒",
@@ -1941,6 +1941,20 @@ const char* th_glossary_str[3][1932] {
         "当前作品已存在同名配置",
         "配置写入失败",
         "新建配置",
+        "total 总和",
+        "got 总和",
+        "收率",
+        "请选择作品与章节",
+        "该章节暂无记录",
+        "章节不在当前作品的关卡表中",
+        "总记录数",
+        "平均miss数",
+        "通过率统计",
+        "总通过率",
+        "该月暂无全关记录",
+        "当前筛选无全关记录",
+        "无 event",
+        "event 数量: %d",
     },
     {
         "",
@@ -3875,6 +3889,20 @@ const char* th_glossary_str[3][1932] {
         "A config with this name already exists for this game",
         "Failed to save config",
         "New Config",
+        "Total",
+        "Got",
+        "Capture Rate",
+        "Select a game and chapter",
+        "No records for this chapter",
+        "Chapter not in this game's checkpoint table",
+        "Total Records",
+        "Avg. Misses",
+        "Pass Rate Stats",
+        "Total Pass Rate",
+        "No full runs this month",
+        "No full runs for this filter",
+        "No events",
+        "Events: %d",
     },
     {
         "",
@@ -5809,6 +5837,20 @@ const char* th_glossary_str[3][1932] {
         "この作品に同名の設定があります",
         "設定の保存に失敗しました",
         "新規設定",
+        "total 合計",
+        "got 合計",
+        "取得率",
+        "作品とチャプターを選んでください",
+        "このチャプターの記録はありません",
+        "チャプターがこの作品の区間表にありません",
+        "総記録数",
+        "平均ミス数",
+        "通過率統計",
+        "総通過率",
+        "この月の全通し記録はありません",
+        "この条件の全通し記録はありません",
+        "イベントなし",
+        "イベント数: %d",
     },
 };
 
