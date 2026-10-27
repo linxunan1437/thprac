@@ -240,6 +240,9 @@
     <ClCompile Include="src\thprac\thprac_th06.cpp">
       <Filter>THPrac Games</Filter>
     </ClCompile>
+    <ClCompile Include="src\thprac\thprac_th06_checkpoints_gen.cpp">
+      <Filter>THPrac Games</Filter>
+    </ClCompile>
     <ClCompile Include="src\thprac\thprac_th07.cpp">
       <Filter>THPrac Games</Filter>
     </ClCompile>
