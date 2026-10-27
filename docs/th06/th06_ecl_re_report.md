@@ -27,7 +27,7 @@
 | **Q6 名字来源** | ❌ **运行期不保留 sub 名**；✅ **但离线已可具名（本报告逐文件核对）** | ECL 文件头只有 subCount + 偏移表，**没有名字区**；加载器 `0x407340` 全文无字符串处理。**但 th06 的 `.ecl`/`.decl` 已于 2026-10-21 备齐**：`SubN`（＝ sub 索引 N）与文件偏移一一对应，本报告已把 321 个 sub 全部解出并与 decl 逐条对齐（`subCount` 与 `decl` 的 `sub` 数量 7/7 全等）。⇒ **th06 可以做到「偏移 ↔ sub 索引 ↔ decl 名」的离线映射**；`th07 / th08` 自 2026-10-21 起素材同样备齐、具备同一能力（见各自 `_checkpoint_entry_report.md`），差别只是本报告对 th06 做到了逐文件核验。 |
 | **Q7 机体 / 子机 / 难度 / 关卡** | ✅ thprac 既有地址全部有效（有 xref 佐证） | `character = *(u8*)0x69D4BD`（47 处引用）、`shotType = *(u8*)0x69D4BE`（40 处）、`difficulty = *(i32*)0x69BCB0`（79，**解释器直接拿它做 `1<<diff` 的难度跳过掩码**，见 §2.4）、`stage = *(u32*)0x69D6D4`（**1-based**，`= GameManager+0x1A34`，用来索引 ECL 文件名表 `0x4764C4`）。 |
 | **Q8 练习跳转影响** | ✅ **立刻反映** | `ECLWarp(t)` = `*(i32*)0x5A5FB0 = t` = **直写 `mgr+0xEE5E8`（时间轴当前时间）**。下一帧 `0x4115D3` 起的时间比较会把 `tlInstr` **快进**到第一条 `time >= t` 的指令（`0x411D15` 的 `+= size` 循环）。练习模式进关会重载 ECL 并把整个管理器清零 ⇒ 指针回到时间轴起点后再快进。**`THPatch` 的另一半（`pair{}`/`ECLSetTime`/`ECLSetHealth`）改的是 sub 脚本指令，与时间轴无关。** |
-| **Q9 段落判定口径** | ✅ 沿用**路过式 checkpoint（latch）**；th06 读取方案见 §10 | **主键 = 时间轴指令偏移** `tlOff = tlInstr − pCode`（**精确相等匹配**，因为每个段落的入口就是时间轴上的某一条指令）；**副键 = 时间值** `tlTime`；**boss 相位副键 = boss 敌机的当前 sub**（`bosses[i]` → `ctx.subId`）。**入口列口径沿用 A 代「时间值」**（＝ `ECLWarp` 入参，与 `docs/logger/th07_checkpoints.csv` / `th08_checkpoints.csv` 的 `时间轴位置` 列同义）。 |
+| **Q9 段落判定口径** | ✅ 沿用**路过式 checkpoint（latch）**；th06 读取方案见 §10 | **主键 = 时间轴指令偏移** `tlOff = tlInstr − pCode`（**精确相等匹配**，因为每个段落的入口就是时间轴上的某一条指令）；**辅助键 = 时间值** `tlTime`。**入口列口径沿用 A 代「时间值」**（＝ `ECLWarp` 入参，与 `docs/logger/th07_checkpoints.csv` / `th08_checkpoints.csv` 的 `时间轴位置` 列同义）。 |
 
 > **关键地址（VA / RVA）**
 > **静态对象**：`ENEMY_MANAGER = 0x4B79C8` / `0xB79C8`（`EnemyManager`，`0xEE5EC` B）；`ECL_MANAGER = 0x487E50` / `0x87E50`（`EclManager`，`+0`=`pCode`、`+4`=`subTable`、`+8`=`timelineStart`）；`GAME_MANAGER = 0x69BCA0` / `0x29BCA0`；`GUI = 0x69BC30`（`+0x20` = `bossPresent` = `0x69BC50`）；`CHAIN = 0x69D918`。
@@ -99,7 +99,6 @@ E + 0x990 : EnemyEclContext currentContext（0x4C B）
 E + 0x9DC : EnemyEclContext savedContextStack[8]（帧长 0x4C）          ★调用栈
 E + 0xC3C : i32 stackDepth（0..7）
 E + 0xC44 : i32 deathCallbackSub
-E + 0xC48 : i32 interrupts[8]（opcode 0x6D 写入的「中断 sub id」表）    ★boss 相位
 E + 0xC68 : i32 runInterrupt（-1=无；≥0 ⇒ 下一次 VM 进入时立即跑 interrupts[它]）
 E + 0xC6C : Float3 position
 E + 0xE40 : u8  本敌机占用的 boss 槽号（opcode 0x65 写入）
@@ -139,7 +138,7 @@ th06 的「章节进度」是**一条**贯穿整关的时间轴（不是 th07 �
 - **`tlTime = *(i32*)(0x4B79C8 + 0xEE5E8) = *(i32*)0x5A5FB0`** —— 时间轴当前时间（帧）；
 - **`tlInstr = *(u32*)(0x4B79C8 + 0xEE5DC) = *(u32*)0x5A5FA4`** —— 当前（下一条待执行）时间轴指令的**绝对地址**，`tlOff = tlInstr − pCode` 即**文件偏移**。
 
-敌机（含 boss）另有一份 `EnemyEclContext`：`currentInstr`（`E+0x990`）、`time.current`（`E+0x99C`）、`subId`（`E+0x9D8`）。**章节定位走时间轴，boss 相位才需要敌机上下文。**
+敌机（含 boss）另有一份 `EnemyEclContext`：`currentInstr`（`E+0x990`）、`time.current`（`E+0x99C`）、`subId`（`E+0x9D8`）。**章节定位只走时间轴，不需要敌机上下文。**
 
 ### 2.2 证据 A：时间轴更新函数 `0x411530`（VA/RVA `0x411530`/`0x11530`）
 
@@ -301,7 +300,7 @@ uint32_t tlInstr = *(uint32_t*)(ENEMY_MANAGER + 0xEE5DC);         // 0 表示尚
 int32_t  tlTime  = *(int32_t*)(ENEMY_MANAGER + 0xEE5E8);          // == *(int32_t*)0x5A5FB0
 uint32_t tlOff   = (tlInstr && pCode) ? (tlInstr - pCode) : 0;    // 文件偏移（越界/0 需保护）
 
-// boss 相位（仅在需要时读）
+// 敌机上下文（仅供其它用途；boss 相位口径已撤下）
 for (int k = 0; k < 8; ++k) {
     uint32_t e = *(uint32_t*)(ENEMY_MANAGER + 0xEE598 + k * 4);
     if (!e) continue;
@@ -566,7 +565,7 @@ CHAIN(0x69D918) 的 calc 链
 
 - 「读运行期 sub 名」不通（本来就没有）；
 - **但「读运行期 sub 索引」完全可行**：`*(u16*)(E+0x9D8)`，再用离线表映射到 `SubN`；
-- **章节级**仍建议只记「时间值」（A 代口径），**boss 相位级**才用 `SubN` 做副键。
+- **章节级**只记「时间值」（A 代口径）；boss 相位相关口径已撤下（§10.3）。
 
 ---
 
@@ -599,7 +598,7 @@ CHAIN(0x69D918) 的 calc 链
 4. **瞬态**：`ECLWarp` 只写时间，**不重置 `timelineInstr`**。所以：
    - 练习模式**进关**会重载 ECL 并把管理器清零（§5.1）⇒ 指针回到时间轴起点，再被新时间快进 ⇒ **正确**；
    - 若在**同一局中途**把时间往回改（例如运行中再次 warp 到更早的段落），指针**不会回退**（`current < instr->time` 只会等待）⇒ **读值仍是旧/较后的位置**。⇒ 采样实现必须把「本局开始」作为重置点（与 th14–18 的 `*_game_start` 重置一致）。
-5. **`THPatch` 的另一半**（`pair{…}` / `ECLSetTime` / `ECLSetHealth` / `ECLStall`）改的是**sub 脚本的指令**（文件偏移，与时间轴同一坐标系），**不触碰时间轴指针与时间**；但它会改变 boss 的**相位脚本走向**（见 §10.3）。
+5. **`THPatch` 的另一半**（`pair{…}` / `ECLSetTime` / `ECLSetHealth` / `ECLStall`）改的是**sub 脚本的指令**（文件偏移，与时间轴同一坐标系），**不触碰时间轴指针与时间**；（boss 相位相关结论已撤下，见 §10.3。）
 6. **`ECLNameFix`** 只是 ANM 文件名补丁，与本机制无关。
 
 ---
@@ -640,32 +639,18 @@ for (const auto& s : whitelistOfStage(stage))     // stage = *(uint32_t*)0x69D6D
 2. **同一帧连跳**：`bossPresent` 期间生成类 opcode 只前进不生成，若一帧内跨过多条入口，采样（每帧一次）可能只看到最后一条。⇒ 采样必须落在**帧间稳定态**（IGI 渲染），且建议「本帧内若 `tlOff` 跳变超过 N 条，则不 latch」。
 3. **`ECLWarp` 不回退指针**（§9 第 4 条）⇒ 必须靠「进关重置」保证起点。
 
-### 10.3 boss 相位的副键（🟡 未真机）
+### 10.3 boss 相位键（**已撤下，2026-10-27**）
 
-同一 boss 的多个 phase 共用**同一个入口偏移**（见 §14 的 st1/st2/st4/st6/st7），此时用**敌机侧**字段：
-
-```cpp
-uint32_t e = *(uint32_t*)(0x4B79C8 + 0xEE598 + k*4);   // bosses[k]，k=0..7
-uint16_t sub      = *(uint16_t*)(e + 0x9D8);           // ★ 当前 sub 索引（→ SubN）
-uint32_t ip       = *(uint32_t*)(e + 0x990);           // 当前指令（→ SubN+0x偏移）
-int32_t  runIrq   = *(int32_t*)(e + 0xC68);            // 最近一次中断序号（-1 = 无）
-int32_t  irqSub   = *(int32_t*)(e + 0xC48 + runIrq*4); // 该中断要跑的 sub id（runIrq ∈ 0..7）
-```
-
-**机制依据**：boss 的每个阶段是**独立 sub**（例：st1 的 `Sub10` 是 boss 控制器，`Sub11` 是第 1 阶段、`Sub16` 是后续阶段）。控制器用 opcode **0x6D**（`0x409524`，`interrupts[arg1] = arg0`）登记阶段，用 **0x6E**（`0x40953E`，`runInterrupt = arg0` 后压栈并 `SetSub(interrupts[runInterrupt])`）触发；时间轴也能用 **op 0xA**（`0x411C3B`，`bosses[arg0]->runInterrupt = arg1`）从外部触发。VM 每次进入时在 `0x4074C0` 检查 `runInterrupt >= 0`，若成立就跳 `0x40954D` 执行中断并把 `runInterrupt` 置 `-1`。
-
-⇒ **`*(u16*)(boss+0x9D8)` 在阶段切换后就是该阶段的 `SubN`**，可直接做为相位键；`runIrq`/`irqSub` 用于「阶段已登记但尚未起跑」的瞬态消歧。
+原内容（`bosses[k]` 的 `E+0x9D8` sub 索引、`runInterrupt`/`interrupts` 相位链、`0x6D`/`0x6E`/`0xA` 机制）**整节删除**。boss 相位与阶段判定的结论**一律作废**，重做前不得引用。CSV 的 70 行 boss 记录原样保留（仅作输入）。
 
 ### 10.4 checkpoint「入口」列记什么（A 代口径不变）
 
 | 段落类型 | 入口列取值 | 来源 |
 | --- | --- | --- |
 | 道中 portion | **时间值**（＝ `ECLWarp` 入参，例 st1 p1 = `68`） | `THStageWarp` |
-| boss / 中boss | **时间值**（例 ST1 BOSS1 = `0x149E`） | `THPatch` |
-| 同时间/同落点的多个 boss 相位 | 时间值 **+ 副键（`SubN`）** | §10.3 |
-| 实现内部（不入 CSV） | 落点偏移 `tlOff`（§13/§14 的 `落点 offset` 列） | 本报告 §7.2 的离线解码 |
+| 实现内部（不入 CSV） | 落点偏移 `tlOff`（§13 的 `落点 offset` 列） | 本报告 §7.2 的离线解码 |
 
-> ⚠ **与 th10–18 的 CSV 语义分叉**：A 代「段落入口」列**不是 sub 名**，而是**时间值**（必要时 + `SubN` 副键）；与 `docs/logger/th07_checkpoints.csv` / `th08_checkpoints.csv` 的 `时间轴位置` 列同义。**本报告不生成 `th06_checkpoints.csv`**（E2 属后续阶段）。
+> ⚠ **与 th10–18 的 CSV 语义分叉**：A 代「段落入口」列**不是 sub 名**，而是**时间值**；与 `docs/logger/th07_checkpoints.csv` / `th08_checkpoints.csv` 的 `时间轴位置` 列同义。**本报告不生成 `th06_checkpoints.csv`**（E2 属后续阶段）。
 
 ---
 
@@ -803,98 +788,8 @@ pCode+timelineOffset  时间轴指令区（连续到文件尾前 4 字节）
 
 ---
 
-## 14. 附录 D —— boss / 中boss 段入口与相位（`THPatch`，候选、未真机）
 
-> 「warp time」= 该 section 第一个 `ECLWarp` 入参（lambda 内的也算；`s2b_nd`/`s3b_n1`/`s4b_time`/`s7b_n1` 已展开）。
-> 「落点 offset」= 第一条 `time >= warp` 的时间轴指令；**多个 section 共享同一落点是常态**（这就是为什么 boss 相位必须用 §10.3 的敌机副键）。
-> 「补丁偏移落在的 sub」= 该 section 所有 `pair{0x…}` 偏移（`ECLSetTime`/`ECLSetHealth` 的偏移不计）所属的 sub —— 即 thprac 实际改写的相位脚本。
-
-| section | warp time | 落点 offset | 落点 time | 落点 op | 首个 spawn sub | 补丁偏移落在的 sub |
-| --- | --- | --- | --- | --- | --- | --- |
-| `TH06_ST1_MID1` | 2008 (`0x7D8`) | `0x51AE` | 2008 | 0 | `Sub8` | `Sub8` |
-| `TH06_ST1_MID2` | 2008 (`0x7D8`) | `0x51AE` | 2008 | 0 | `Sub8` | `Sub8` |
-| `TH06_ST1_BOSS1` | 5278 (`0x149E`) | `0x5F92` | 5278 | 8 | `Sub10` | `Sub11` |
-| `TH06_ST1_BOSS2` | 5279 (`0x149F`) | `0x5F9A` | 5279 | 9 | `Sub10` | `Sub11` |
-| `TH06_ST1_BOSS3` | 5279 (`0x149F`) | `0x5F9A` | 5279 | 9 | `Sub10` | `Sub11`, `Sub16` |
-| `TH06_ST1_BOSS4` | 5279 (`0x149F`) | `0x5F9A` | 5279 | 9 | `Sub10` | `Sub11`, `Sub16` |
-| `TH06_ST2_MID1` | 2588 (`0xA1C`) | `0x477C` | 2588 | 0 | `Sub20` | — |
-| `TH06_ST2_BOSS1` | 5983 (`0x175F`) | `0x68A0` | 5983 | 8 | `Sub21` | — |
-| `TH06_ST2_BOSS2` | 5984 (`0x1760`) | `0x68A8` | 5984 | 9 | `Sub21` | `Sub22` |
-| `TH06_ST2_BOSS3` | 5984 (`0x1760`) | `0x68A8` | 5984 | 9 | `Sub21` | `Sub22`, `Sub25` |
-| `TH06_ST2_BOSS4` | 5984 (`0x1760`) | `0x68A8` | 5984 | 9 | `Sub21` | `Sub22`, `Sub25` |
-| `TH06_ST2_BOSS5` | 5984 (`0x1760`) | `0x68A8` | 5984 | 9 | `Sub21` | `Sub22`, `Sub25`, `Sub32` |
-| `TH06_ST3_MID1` | 3804 (`0xEDC`) | `0x6C2E` | 3804 | 0 | `Sub9` | — |
-| `TH06_ST3_MID2` | 3804 (`0xEDC`) | `0x6C2E` | 3804 | 0 | `Sub9` | `Sub9`, `Sub10` |
-| `TH06_ST3_BOSS1` | 5844 (`0x16D4`) | `0x80D6` | 5854 | 0 | `Sub17` | `Sub10`, `Sub17`, `Sub18` |
-| `TH06_ST3_BOSS2` | 5844 (`0x16D4`) | `0x80D6` | 5854 | 0 | `Sub17` | `Sub10`, `Sub17`, `Sub18` |
-| `TH06_ST3_BOSS3` | 5844 (`0x16D4`) | `0x80D6` | 5854 | 0 | `Sub17` | `Sub10`, `Sub17`, `Sub18`, `Sub20` |
-| `TH06_ST3_BOSS4` | 5844 (`0x16D4`) | `0x80D6` | 5854 | 0 | `Sub17` | `Sub10`, `Sub17`, `Sub18`, `Sub20` |
-| `TH06_ST3_BOSS5` | 5844 (`0x16D4`) | `0x80D6` | 5854 | 0 | `Sub17` | `Sub10`, `Sub17`, `Sub18`, `Sub26` |
-| `TH06_ST3_BOSS6` | 5844 (`0x16D4`) | `0x80D6` | 5854 | 0 | `Sub17` | `Sub10`, `Sub17`, `Sub18`, `Sub26` |
-| `TH06_ST3_BOSS7` | 5844 (`0x16D4`) | `0x80D6` | 5854 | 0 | `Sub17` | `Sub10`, `Sub17`, `Sub18`, `Sub26`, `Sub33` |
-| `TH06_ST4_BOOKS` | 3392 (`0xD40`) | `0xCDD4` | 3452 | 4 | `Sub14` | `Sub14` |
-| `TH06_ST4_MID1` | 4132 (`0x1024`) | `0xCE7C` | 4132 | 0 | `Sub21` | — |
-| `TH06_ST4_BOSS1` | 10694 (`0x29C6`) | `0xED1C` | 10694 | 8 | `Sub26` | — |
-| `TH06_ST4_BOSS2` | 10695 (`0x29C7`) | `0xED24` | 10695 | 9 | `Sub26` | `Sub27` |
-| `TH06_ST4_BOSS3` | 10695 (`0x29C7`) | `0xED24` | 10695 | 9 | `Sub26` | `Sub27`, `Sub37` |
-| `TH06_ST4_BOSS4` | 10695 (`0x29C7`) | `0xED24` | 10695 | 9 | `Sub26` | `Sub27`, `Sub37` |
-| `TH06_ST4_BOSS5` | 10695 (`0x29C7`) | `0xED24` | 10695 | 9 | `Sub26` | `Sub27`, `Sub39` |
-| `TH06_ST4_BOSS6` | 10695 (`0x29C7`) | `0xED24` | 10695 | 9 | `Sub26` | `Sub27`, `Sub39`, `Sub40` |
-| `TH06_ST4_BOSS7` | 10695 (`0x29C7`) | `0xED24` | 10695 | 9 | `Sub26` | `Sub27`, `Sub39`, `Sub41` |
-| `TH06_ST5_MID1` | 3372 (`0xD2C`) | `0x6488` | 3372 | 0 | `Sub12` | — |
-| `TH06_ST5_MID2` | 3372 (`0xD2C`) | `0x6488` | 3372 | 0 | `Sub12` | — |
-| `TH06_ST5_BOSS1` | 7704 (`0x1E18`) | `0x7660` | 7704 | 0 | `Sub21` | `Sub22` |
-| `TH06_ST5_BOSS2` | 7704 (`0x1E18`) | `0x7660` | 7704 | 0 | `Sub21` | `Sub22` |
-| `TH06_ST5_BOSS3` | 7704 (`0x1E18`) | `0x7660` | 7704 | 0 | `Sub21` | `Sub22`, `Sub34` |
-| `TH06_ST5_BOSS4` | 7704 (`0x1E18`) | `0x7660` | 7704 | 0 | `Sub21` | `Sub22`, `Sub34` |
-| `TH06_ST5_BOSS5` | 7704 (`0x1E18`) | `0x7660` | 7704 | 0 | `Sub21` | `Sub22`, `Sub41` |
-| `TH06_ST5_BOSS6` | 7704 (`0x1E18`) | `0x7660` | 7704 | 0 | `Sub21` | `Sub22`, `Sub41` |
-| `TH06_ST6_MID1` | 2564 (`0xA04`) | `0x77D6` | 2564 | 0 | `Sub8` | `Sub8` |
-| `TH06_ST6_MID2` | 2564 (`0xA04`) | `0x77D6` | 2564 | 0 | `Sub8` | `Sub9` |
-| `TH06_ST6_BOSS1` | 3167 (`0xC5F`) | `0x781A` | 3167 | 8 | `Sub15` | `Sub17` |
-| `TH06_ST6_BOSS2` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17` |
-| `TH06_ST6_BOSS3` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17`, `Sub19` |
-| `TH06_ST6_BOSS4` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17`, `Sub19` |
-| `TH06_ST6_BOSS5` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17`, `Sub23` |
-| `TH06_ST6_BOSS6` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17`, `Sub23` |
-| `TH06_ST6_BOSS7` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17`, `Sub26` |
-| `TH06_ST6_BOSS8` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17`, `Sub26` |
-| `TH06_ST6_BOSS9` | 3169 (`0xC61`) | `0x782A` | 3169 | 0 | `Sub15` | `Sub17`, `Sub43`, `Sub44` |
-| `TH06_ST7_MID1` | 4740 (`0x1284`) | `0xD2C6` | 4740 | 0 | `Sub16` | — |
-| `TH06_ST7_MID2` | 4740 (`0x1284`) | `0xD2C6` | 4740 | 0 | `Sub16` | `Sub17`, `Sub18` |
-| `TH06_ST7_MID3` | 4740 (`0x1284`) | `0xD2C6` | 4740 | 0 | `Sub16` | `Sub17`, `Sub19` |
-| `TH06_ST7_END_NS1` | 8593 (`0x2191`) | `0xE992` | 8593 | 8 | `Sub31` | `Sub32` |
-| `TH06_ST7_END_S1` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32` |
-| `TH06_ST7_END_NS2` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub35` |
-| `TH06_ST7_END_S2` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub35` |
-| `TH06_ST7_END_NS3` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub38` |
-| `TH06_ST7_END_S3` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub38` |
-| `TH06_ST7_END_NS4` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub43` |
-| `TH06_ST7_END_S4` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub43` |
-| `TH06_ST7_END_NS5` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub47` |
-| `TH06_ST7_END_S5` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub47` |
-| `TH06_ST7_END_NS6` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub49` |
-| `TH06_ST7_END_S6` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub49` |
-| `TH06_ST7_END_NS7` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub53` |
-| `TH06_ST7_END_S7` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub53` |
-| `TH06_ST7_END_NS8` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub56` |
-| `TH06_ST7_END_S8` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub56` |
-| `TH06_ST7_END_S9` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub59` |
-| `TH06_ST7_END_S10` | 8594 (`0x2192`) | `0xE99A` | 8594 | 9 | `Sub31` | `Sub32`, `Sub67` |
-
-**读表要点**
-
-1. **BOSS1 与其他 boss 相位的落点差 1 条指令**（`0x5F92` op8 vs `0x5F9A` op9）—— 因为 `0x149E` 与 `0x149F` 只差 1 帧；`TH06_ST1_BOSS2/3/4` **三者落点相同**，必须靠 §10.3 的副键区分。
-2. **中boss 的落点唯一**（MID1/MID2 同名同落点）；它们的区别在 `ECLSetHealth`（不在本表统计内）。
-3. **st4 `BOOKS` 与 `portion 4` 同落点 `0xCDD4`**：thprac 把「books 关」既当 portion 又当独立 section（`TH06_ST4_BOOKS`）；实现时需按 `th_sections_t` 归一。
-4. **`TH06_ST3_BOSS*` 七个 section 全部同落点**（warp 都是 `0x16D4`），相位完全靠 `Sub17`/`Sub18`/`Sub20`/`Sub26`/`Sub33` 区分 —— 这是 th06 里最依赖副键的一组。
-5. **`TH06_ST7_END_*` 18 个 section 全部同落点**（`0xE99A`），靠 `Sub32`+`Sub35/38/43/47/49/53/56/59/67` 区分。
-6. **⚠️ 本表的 `warp time` 取的是 section 体内「第一个」`ECLWarp`，即 `if (thPracParam.dlg)` 那一支**（本表口径，2026-10-22 建表时定）。**`dlg` 默认 `false`**（`GuiCheckBox` 的 `bool mToggle = false`，`thprac_gui_components.h:588`；`mDlg` 是普通 `GuiCheckBox`，`thprac_th06.cpp:916`），且 `THPatch` 打补丁的分支是 `if (!thPracParam.dlg)` ⇒ **默认练习走非 dlg 路径**。因此 **5 行**的 `warp/落点` 与「非 dlg」差 1–2 帧：`ST1 BOSS1` 5278/`0x5F92` → **5279/`0x5F9A`**、`ST2 BOSS1` 5983/`0x68A0` → **5984/`0x68A8`**、`ST4 BOSS1` 10694/`0xED1C` → **10695/`0xED24`**、`ST6 BOSS1` 3167/`0x781A` → **3169/`0x782A`**、`ST7 END_NS1` 8593/`0xE992` → **8594/`0xE99A`**（`ST3 BOSS1` 两路同值 5844/`0x80D6`）；`ST6 BOSS1` 的 op 也由 `op8` 变 `op0`。**`docs/logger/th06_checkpoints.csv` 已按非 dlg 回填**（2026-10-26 裁决），逐行对照与副键见 `docs/th06/th06_checkpoint_entry_report.md` §1.3 / §5.1。
-7. **`ST4 BOOKS` 与 `ST4 前半 #4` 同落点（portion 4 属前半）**：2026-10-26 用户裁决 **保留 `ST4 BOOKS`、删除章节行 `ST4 前半 #4`**（CSV 110→109）。本表仍列 40 个 portion（含 portion 4），供核对用。
-
----
-
-## 15. 工具与复现
+## 14. 工具与复现
 
 - 环境：macOS + `python3 3.9.6` + `pefile 2024.8.26` + `capstone 5.0.7`（**只读静态反汇编**）；ECL 侧为自写纯 Python 解码（无外部依赖）。
 - 反汇编 helper：`P(path)`；`off(va)=pe.get_offset_from_rva(va-0x400000)`（**勿用 `va-0x400000`**）；`dis(va,n)`；`u32(va)`；`xrefs(val)`（在可执行节内搜 4 字节小端立即数/disp32）。
@@ -913,16 +808,15 @@ pCode+timelineOffset  时间轴指令区（连续到文件尾前 4 字节）
 
 ---
 
-## 16. 真机验证清单（E6 待做；本轮**未做**）
+## 15. 真机验证清单（E6 待做；本轮**未做**）
 
 > 本机为 macOS，**以下全部未验证**；状态一律「静态定案（🟡 已定案、未真机三态）」。
 
 - [ ] **静态性**：进关后 `*(u32*)0x487E50 != 0`；`*(u32*)(0x4B79C8+0xEE5DC)` 落在 `pCode` 与 `pCode+fileSize` 之间。
-- [ ] **时间轴时间随进度推进**：道中/boss 各采样一次，`*(i32*)0x5A5FB0` 单调递增（boss 战期间可被 op 0xC 冻结）。
+- [ ] **时间轴时间随进度推进**：道中若干段落各采样一次，`*(i32*)0x5A5FB0` 单调递增（boss 战期间可被 op 0xC 冻结）。
 - [ ] **`Q1` 落点**：st1 portion 1 进关后 `tlInstr − pCode == 0x472E`（附录 C 首行）。
-- [ ] **`Q8` warp 立即生效**：练习跳章后下一帧 `*(i32*)0x5A5FB0 == 目标时间`，且 `tlInstr − pCode` == 附录 C/D 的落点。
-- [ ] **`Q9` latch**：用附录 C/D 的落点表，各段落精确命中、段内 no-op、首次命中前为 `main`。
-- [ ] **boss 相位副键**：st3（7 个 section 同落点）与 st7 END（18 个 section 同落点）逐相位验证 `*(u16*)(boss+0x9D8)` 能否区分。
+- [ ] **`Q8` warp 立即生效**：练习跳章后下一帧 `*(i32*)0x5A5FB0 == 目标时间`，且 `tlInstr − pCode` == 附录 C 的落点。
+- [ ] **`Q9` latch**：用附录 C 的落点表，各段落精确命中、段内 no-op、首次命中前为 `main`。
 - [ ] **中boss 窗口**：st1/st2/st4/st5 的中boss 战期间 `tlInstr` 是否会掠过后续段落入口（thprac `TH_TIMELOCK` 的注释说会）。
 - [ ] **st4 路线分支**：st4 全 9 个 portion 各跑一次（分支在 sub 内部，时间轴落点应一致）。
 - [ ] **replay / attract**：`isInReplay`（`0x69BCBC`）为真时读值是否异常（管理器是否照常推进）。
@@ -931,10 +825,10 @@ pCode+timelineOffset  时间轴指令区（连续到文件尾前 4 字节）
 
 ---
 
-## 17. 变更记录
+## 16. 变更记录
 
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-22 | 建档（本报告）。th06 的 ECL 段落监控逆向（阶段 E1，静态定案 🟡），**首次使用 2026-10-21 备齐的 `.ecl`/`.decl` 素材**。**Q1**：当前位置＝**全局唯一时间轴的「时间值 + 指令指针」**（`mgr = 0x4B79C8`；`tlInstr = *(u32*)(mgr+0xEE5DC) = 0x5A5FA4`、`tlTime = *(i32*)(mgr+0xEE5E8) = *(i32*)0x5A5FB0`），**没有** th07 的多 timeline、**没有** th08 的宿主 cursor；敌机另有 `enemy+0x990` 的 `EnemyEclContext`（`+0` ip / `+0x0C` 局部时间 / `+0x48` subId）。**Q2**：sub 表 = `*(u32*)(0x487E50+4)`（= `pCode+0x10`）、时间轴起点 = `*(u32*)(0x487E50+8)`（= `pCode + *(u32*)(pCode+4)`），由加载器 `0x407340` 就地绝对化；**文件头布局实测**：`+0` i16 subCount、`+4` u32 时间轴偏移、`+0x10` u32[subCount] sub 偏移表；`call` = opcode 0x23、`ret` = 0x24。**Q3**：调用栈存在（基址 `enemy+0x9DC`、帧 `0x4C`、深度 `+0xC3C`、上限 8），仅事实记录。**Q4**：宿主静态（`0x4B79C8` / `0x487E50`），由链元素 `0x5A5FB4`（calc，优先级 9）驱动 `0x4123E0`，管理器每次进关被 `0x410E30` 全量清零（`rep stosd 0x3B97B` = `0xEE5EC` B）⇒ **无需捕获**。**Q5**：每帧唯一驱动 = `0x411530`（`ECX = mgr`，`0x4123F0` 调用），时钟推进 `0x412E07`–`0x412E31`（`ZunTimer::Tick` = `0x424285`）；thprac 已占 `0x412E31`/`0x41188A`/`0x411669` ⇒ **推荐不挂 hook**，备选 `0x411530`（9B）。**Q6**：运行期无 sub 名（加载器无字符串处理、`call`/生成器只传索引），**但 `.decl` 已备齐** ⇒ `SubN` = sub 索引 N，7/7 文件 `subCount` 与 `decl` 的 `sub` 数全等、逐 sub 指令数差恒为 1（终止哨兵 `{-1,-1,12}`）⇒ **离线可具名**。**Q7**：thprac 既有地址全部有效，另确认 `difficulty` 被解释器用作 `1<<diff` 难度掩码（`0x4074F6`）、`currentStage`（`0x69D6D4`，1-based）= `GameManager+0x1A34` 索引 ECL 文件名表 `0x4764C4`、`bossPresent = GUI(0x69BC30)+0x20 = 0x69BC50`。**Q8**：`ECLWarp` 直写 `timelineTime.current`，下一帧 `0x4115D3` 快进到第一条 `time >= t`；**指针不回退**（同局内往回 warp 无效），须靠进关清零。**Q9**：沿用 latch；th06 方案 = **主键「时间轴指令偏移精确相等」+ 副键时间值 + boss 相位用 `bosses[k]` 的 `ctx.subId`**；入口列口径沿用 A 代「时间值」。新增附录 A（ECL 文件结构 + 7 文件统计 + books 常量交叉印证）、附录 B（时间轴 opcode 0..0xC 全表 + 各关分布）、附录 C（40 个道中 portion 的 warp/落点/sub）、附录 D（70 个 boss section 的 warp/落点/sub/补丁归属）。**未真机三态**；**未生成 `docs/logger/th06_checkpoints.csv`**（E2 属后续阶段）。 |
 | 2026-10-22 | **素材对比口径订正（不改结论 / 地址）**：原文 §1 对比表与 §7.2 写「th07 / th08 无 `.ecl`/`.decl`」「th06 相对两作的最大优势」，与 2026-10-21 已补齐三作素材的事实矛盾（`_dump_report_a_gen.txt` 39/39）。现改为：**三作素材均已备齐，均可做 `SubN`（＝ sub 索引 N）离线映射**；th06 的差异只在于本报告做了 7/7 逐文件核验（th07 8 份 / th08 24 份的核对见各自 `thXX_checkpoint_entry_report.md`）。**未改任何地址、结论与数值。** |
-| 2026-10-26 | **附录 D 口径注记（不改任何数值 / 地址 / 结论）**：E3/E4 回填（`docs/logger/th06_checkpoints.csv` 109 行）时确认 **附录 D 的 `warp time` 取的是 `if (thPracParam.dlg)` 那一支**，而 `dlg` 默认 `false`（`GuiCheckBox mToggle=false`，`thprac_gui_components.h:588`）⇒ 默认练习走**非 dlg**。故新增 §14 读表要点第 6 条：5 行非 dlg 值为 `ST1 BOSS1` 5279/`0x5F9A`、`ST2 BOSS1` 5984/`0x68A8`、`ST4 BOSS1` 10695/`0xED24`、`ST6 BOSS1` 3169/`0x782A`、`ST7 END_NS1` 8594/`0xE99A`（`ST3 BOSS1` 两路同值）；第 7 条登记 `ST4 前半 #4` 删除裁决（portion 4 属**前半**，与 `ST4 BOOKS` 同 `ECLWarp(0x0d40)`）。**本表 40 + 70 行数值一律未改**（仍为「第一个 `ECLWarp`」口径），逐行对照与副键见 `docs/th06/th06_checkpoint_entry_report.md` §1.3 / §5.1 / §3。 |
+| 2026-10-27 | **删除全部 boss 阶段相关内容**：§10.3 整节（`E+0x9D8` 副键与相位链接口）、§10.4 的 boss 行、§14 附录 D（70 个 boss section 入口表）、§16 的 boss 副键验证项；§0 与正文的 boss 表述同步收口。**CSV 未动、地址与 Q1–Q8 结论未改；🟡 未真机。** |

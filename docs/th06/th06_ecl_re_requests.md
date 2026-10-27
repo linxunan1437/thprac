@@ -58,7 +58,7 @@
 > **结论摘要（✅ 静态定案、🟡 未真机）**：三选一＝ **(b) 时间值 + (c) 指令指针，两者并存于「全局唯一一条时间轴」**；**(a) 没有独立游标**。
 > `mgr = ENEMY_MANAGER = 0x4B79C8`（静态）；**`tlInstr = *(u32*)(mgr+0xEE5DC)`（＝`0x5A5FA4`，当前时间轴指令的绝对地址）**、**`tlTime = *(i32*)(mgr+0xEE5E8)`（＝`*(i32*)0x5A5FB0`，当前时间值＝帧）**。
 > 时间轴更新 `0x411530`（每帧一次）：`current == instr->time` 执行、`current > time` 跳过（`+= size`）、`current < time` 等待（`0x4115D3`/`0x411CEF`/`0x411D15`）。
-> 敌机侧另有 `EnemyEclContext`（`enemy+0x990`）：`+0` = `currentInstr`、`+0x0C` = 局部时间、`+0x48` = `subId`（`enemy+0x9D8`）—— **章节定位不用它，boss 相位才用**。
+> 敌机侧另有 `EnemyEclContext`（`enemy+0x990`）：`+0` = `currentInstr`、`+0x0C` = 局部时间、`+0x48` = `subId`（`enemy+0x9D8`）—— **章节定位不用它；boss 相位相关口径已撤下（2026-10-27）**。
 
 - 在 `0x41188A` / `0x411669` 命中时，`pCtx->Ebp-0x14` / `-0xC` 是「时间轴当前指令指针」。请回答：**引擎里「当前执行到哪」到底存在哪个结构、哪个偏移、什么类型？**
 - 三选一（可并存，需说明关系）：
@@ -123,7 +123,7 @@
 ## 9. Q8/Q9 练习跳转补丁影响 + 段落判定口径（**已答** → 报告 §9/§10）
 
 > **Q8 结论摘要（✅ 静态定案、🟡 未真机）**：`ECLWarp(t)` 就是 `*(i32*)0x5A5FB0 = t`，而 `0x5A5FB0 = mgr+0xEE5E8 = timelineTime.current` ⇒ **直写时间轴的当前时间**；下一帧 `0x4115D3` 起的比较循环把 `tlInstr` 快进到第一条 `time >= t`（`0x411D15` 的 `+= size`）⇒ **跳转后读时间/落点立刻正确**。⚠️ `ECLWarp` **不重置 `tlInstr`**：同局内把时间往回改不会让指针回退，**必须靠进关重载**（管理器清零）保证起点。`THPatch` 的 `pair{}`/`ECLSetTime`/`ECLSetHealth`/`ECLStall` 改的是 sub 脚本指令，不动时间轴。
-> **Q9 结论摘要（✅）**：沿用 latch（不重新论证）。**th06 读取方案＝主键「时间轴指令偏移精确相等」**（`tlOff = tlInstr − pCode`，与附录 C/D 的落点逐条比对）、**副键时间值** `tlTime`；**boss 相位副键＝`bosses[k]` 的 `*(u16*)(boss+0x9D8)`**（`SubN`）。**入口列口径＝时间值**（＝`ECLWarp` 入参），与 th07/th08 的「时间轴位置」列同义。**中boss 窗口（st1/st2/st4/st5 缺 `boss_wait`，thprac `TH_TIMELOCK` 会人为冻结）需按 th16 §5.7 处理**。
+> **Q9 结论摘要（✅）**：沿用 latch（不重新论证）。**th06 读取方案＝主键「时间轴指令偏移精确相等」**（`tlOff = tlInstr − pCode`，与附录 C/D 的落点逐条比对）、**辅助校验用时间值** `tlTime`；**boss 相位相关口径已于 2026-10-27 撤下**。**入口列口径＝时间值**（＝`ECLWarp` 入参），与 th07/th08 的「时间轴位置」列同义。**中boss 窗口（st1/st2/st4/st5 缺 `boss_wait`，thprac `TH_TIMELOCK` 会人为冻结）需按 th16 §5.7 处理**。
 
 > **Q9（段落判定口径）**：**沿用总括 §6 Q9 的定案「路过式 checkpoint（latch）」** —— 经过白名单条目即置值、不在表内 no-op（不回退 `main`）、首次命中前显示 `main`。**A 代不重新论证**，本作只需回答：**当前位置怎么取**（Q1/Q2）+ **每段入口取值**。
 

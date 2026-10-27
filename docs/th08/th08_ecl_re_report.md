@@ -584,14 +584,13 @@ int16_t  esub   = *(int16_t*)(cursor + 0x224);       // 当前 sub_id
    - `slot+0x08` = i32 **time**（`ECLWarp` 的 `time1`）；
    - `slot+0x0C` = u32 **命令指针**（`ECLWarp` 的 `offset1` 落点，`pECL + offset`）。
    `ECLWarp` 写的正是这两个字段，所以 CSV 的 `(time, offset)` 与车道字段**一一对应**。
-2. **匹配键 = `offset` 单键**：`cur_off = *(u32*)(slot+0xC) − pECL`，与白名单 offset 精确相等即命中；**`time` 不参与相等判定** —— 实测 CSV 的 time 是 warp 入参（目标时间），**不是**落点命令自身的 time：章节 35 行差 +60（`slot+8` 先扫描到 `ins->time` 后才执行）、`ST7 后半 #3` 差 +90、`ST4B 前半 #1` 差 −339（offset 恰是 `slot0` 初始命令 t=1）、`ST4A LS`/`ST4B LS` 差 +1。`time` 仅作**日志可读性 / 辅助校验**。
+2. **匹配键 = `offset` 单键**：`cur_off = *(u32*)(slot+0xC) − pECL`，与白名单 offset 精确相等即命中；**`time` 不参与相等判定** —— 实测 CSV 的 time 是 warp 入参（目标时间），**不是**落点命令自身的 time：章节 35 行差 +60（`slot+8` 先扫描到 `ins->time` 后才执行）、`ST7 后半 #3` 差 +90、`ST4B 前半 #1` 差 −339（offset 恰是 `slot0` 初始命令 t=1）。`time` 仅作**日志可读性 / 辅助校验**。
 3. **checkpoint「入口」列**：记 `(time, offset)`（＝该段落 `ECLWarp` 的第一个 pair）；第 2–4 个 pair 是辅助 lane，**不登记**。
 4. **主 lane**：`ECLWarp` 最多写 4 个 slot；主线是**第 1 个 pair 写入的那条**（thprac 固定从 `slot0` 起写）。哪条 slot 承载主线段落在真机上确认（🟡）。
-5. **同值分节（2026-10-22 补：两级判定）**：一级键（车道 `(time,offset)`）在 boss 段大量重复（CSV 141 行只有 67 个不同值，17 组覆盖 91 行；如 `ST1 BOSS1..4` 同为 `4175/0xAC84`）⇒ **必须两级**：一级定「boss 容器」，二级读 **boss 宿主 cursor 的 `(sub_id, 脚本时间)`**（`cursor+0x224` / `cursor+0xC`）按相位签名匹配。**注意 th08 不能用 th07 的「按补丁 offset 升序切区间」** —— th08 的补丁偏移不按相位单调（`ST1 BOSS2` 在 `0x3d30`，而 `BOSS3/BOSS4` 在更靠前的 `0x3d08`，且分别 jump 到 `0x4E0C` / call sub 33）。完整口径（签名推导规则、挑宿主、边界、验证清单）见 **`docs/th08/th08_checkpoint_entry_report.md` §9**。
 
 ## 附录 A —— 候选段落入口值表（候选、**未真机**）
 
-> 来源：`thprac/src/thprac/thprac_th08.cpp` 的 `THStageWarp`（道中 portion，`:1513–1694`）与 `THPatch`（boss section，`:1695–2769`）。
+> 来源：`thprac/src/thprac/thprac_th08.cpp` 的 `THStageWarp`（道中 portion，`:1513–1694`）。本文只列道中；boss 部分已撤下（见 §A.2）。
 > 取值 = 每次 `ECLWarp(...)` 的**第一个 `(time, offset)` 对**（= `ECLWarp` 的 `time1/offset1`）；括号内为其余 pair。
 > ⚠️ 全部为**候选**：`offset` 指向的是「timeline 命令」（§3.4），**未真机确认它就是该段落的第一条可执行指令**。
 
@@ -618,46 +617,9 @@ int16_t  esub   = *(int16_t*)(cursor + 0x224);       // 当前 sub_id
 | ST6B | 1,2 | 200 / 1140 | `0x10324` / `0x10364` | — |
 | ST7（Extra） | 1..7 | 340 / 1010 / 2900 / 5237 / 5947 / 6757 / 8337 | `0x12544` / `0x127A8` / `0x12B6C` / `0x132B8` / `0x136B4` / `0x13774` / `0x151F4` | p1 (20,`0x1535C`)；p2 (210,`0x155C0`)；p3 (390,`0x15824`)；p4 (810,`0x15D60`)；p5–p7 (20,`0x1535C`) |
 
-### A.2 `THPatch`（boss / 中boss section，按枚举顺序 `THPrac::TH08::TH08_ST*`）
+### A.2 `THPatch`（boss / 中boss）—— **已撤下，2026-10-27**
 
-| section | time | offset | 备注 |
-| --- | --- | --- | --- |
-| ST1_MID1 / MID2 | 2935 | `0xAB78` | + (20, `0xAD18`)；MID2 另有 `ECLSetTime` |
-| ST1_BOSS1 | 4175 | `0xAC70`(dlg) / `0xAC84` | 单 pair |
-| ST1_BOSS2 / BOSS3 / BOSS4 | 4175 | `0xAC84` | |
-| ST1_LS | 4176 | `0xACD0` | + (0, −1) |
-| ST2_MID1 / MID2 / BOSS1..BOSS5 | 4870 | `0xC020` | + (0, −1) |
-| ST2_LS | 4871 | `0xC07C` | + (0, −1) |
-| ST3_MID1 / MID2 | 3080 | `0xB5D8` | + (380,`0xBACC`) (0,`0xBB74`) (160,`0xC304`) |
-| ST3_BOSS1..BOSS6 | 4663 | `0xB87C` | + (0,−1)×3 |
-| ST3_LS | 4663 | `0xB8CC` | + (0,−1)×3 |
-| ST4A_BOSS1 | 4962 | `0xB26C`(dlg) / `0xB280` | + (360, `0xBED4`)；另 `STDJump/STDStage4Fix` |
-| ST4A_BOSS2..BOSS4 | 4962 | `0xB280` | 同上 |
-| ST4A_BOSS5..BOSS9 | 6923 | `0xBA50` | + (0,−1) |
-| ST4A_LS | 6923 | `0xBAAC` | + (0,−1) |
-| ST4B_BOSS1 | 4962 | `0xD4F0`(dlg) / `0xD504` | + (360, `0xE158`) |
-| ST4B_BOSS2..BOSS4 | 4962 | `0xD504` | |
-| ST4B_BOSS5..BOSS9 | 6923 | `0xDCD4` | + (0,−1) |
-| ST4B_LS | 6923 | `0xDD30` | + (0,−1) |
-| ST5_MID1 / MID2 | 4530 | `0xB0BC` | |
-| ST5_BOSS1 | 7481 | `0xB788`(dlg) / `0xB79C` | |
-| ST5_BOSS2..BOSS7 | 7481 | `0xB79C` | |
-| ST5_LS | 7484 | `0xB820` | |
-| ST6A_MID1 / MID2 | 3400 | `0xC7D4` | |
-| ST6A_BOSS1 | 4022 | `0xC824`(dlg) / `0xC838` | |
-| ST6A_BOSS2..BOSS9 | 4022 | `0xC838` | |
-| ST6A_LS | 4083 | `0xC89C` | |
-| ST6B_MID1 / MID2 | 3490 | `0x104E4` | |
-| ST6B_BOSS1 | 4112 | `0x10534`(dlg) / `0x10548` | |
-| ST6B_BOSS2..BOSS9 | 4112 | `0x10548` | |
-| ST6B_LS1..LS5 | 4234 / 4235 / 4236 / 4237 / 4238 | `0x105AC` / `0x105EC` / `0x1062C` / `0x1066C` / `0x106AC` | |
-| ST7_MID1..MID3 | 5155 | `0x13268` | + (810, `0x15D60`) |
-| ST7_END_NS1 | 9497 | `0x152B4`(dlg) / `0x152C8` | |
-| ST7_END_S1..S10 | 9497 | `0x152C8` | |
-| ST7_END_LS | 9678 | `0x1530C` | |
-| TH08_LW_1..17 | — | — | **源码里是空 case（`break`）**，无 `ECLWarp` ⇒ 无候选入口 |
-
-> **A.2 注（辅助 lane）**：`ECLWarp` 的第 2–4 个 pair（如 st3 的 `0xB91C`/`0xBB74`/`0xC0AC`、st4–5 的 `0xBED4`/`0xE158`、st9 的 `0x1535C`…）**不是**该段落的入口，而是同帧要一并压进其它 slot 的辅助脚本（推测：背景/符卡/演出）。做 checkpoint 时**只取第 1 个 pair**；`offset == -1` 的 pair（如 `(0, -1)`）连指针都没写，只是「把时间置 0」。
+原 boss 入口表（按 `TH08_ST*` 枚举的 `(time, offset)` 与补丁对）整节删除；boss 阶段判定结论**一律作废**，重做前不得引用。CSV 的 121 行 boss 记录原样保留（仅作输入）。
 
 ### A.3 `STDStage4Fix` / `STDJump`（独立 STD 时间轴，**不入 checkpoint 表**）
 
@@ -706,3 +668,4 @@ STDStage4Fix(): std[0xED8]=1, std[0xF14]=1（+ 末符卡时 0x1394/0xF48 各写�
 | 2026-10-22 | **素材状态订正（不改结论）**：头部「ECL / decl 素材：无」改为「本报告撰写时无；2026-10-21 已补齐 `../exes/ecl/th08/ecldata*.ecl`（24）+ `../exes/ecl_dump/th08/*.decl`（`thecl -d8 -m ECL_MAP_08.txt`），**本报告结论未据此复核**」；「同代参照：th06（无 exe）」改为「th06（E1 见 `docs/th06/th06_ecl_re_report.md`）」。**地址与结论一字未改。** |
 | 2026-10-22 | **E3/E4 回填 + 读取面订正**（地址/结论数值未改）。CSV 第 1 列回填 **141/158**（章节 37 + boss 104；`LW 1..17` 按用户决定留空、不算缺口）。**§9.2 重写**：141 个 warp offset 全量复算后**全部落在时间轴车道命令区**、与 sub 指令链交集为空（9 关逐一 = ∅）⇒ 原「读宿主 cursor `cur_ins−pECL` 精确匹配」**作废**，改读 **Timeline 车道**（`slot+8`=time、`slot+0xC`=命令指针）；匹配键定为 **offset 单键**，`time` 仅作可读性（实测 39 行 time 与落点命令 t 不等：章节 +60/+90/−339、LS +1）。**§0 Q9 行同步**。**附录 A.1 标签订正**：`stN` 是 `THStageWarp` 的 `stage` 实参，`st4..st9`＝`ST4A/ST4B/ST5/ST6A/ST6B/ST7(Extra)`，原「`st9`（LW?）」错误（LW 无 chapter case）。逐行权威表见 `docs/th08/th08_checkpoint_entry_report.md`。**未真机（🟡）。** |
 | 2026-10-22 | **补「两级判定」交叉引用**：§9.2 第 5 条重写 —— 一级键（车道 `(time,offset)`）在 boss 段大量重复（141 行 67 个不同值），须二级读 boss 宿主 cursor 的 `(sub_id, 脚本时间)`；并明确 **th08 不能用「补丁 offset 升序切区间」**（偏移不按相位单调，`ST1 BOSS2`@`0x3d30` 晚于 `BOSS3/BOSS4`@`0x3d08`，且分别为 jump `0x4E0C` / call sub 33）。完整口径见 `docs/th08/th08_checkpoint_entry_report.md` §9。**结论/地址未改；🟡 未真机。** |
+| 2026-10-27 | **删除全部 boss 阶段相关内容**：§9.2 第 5 条（boss 两级判定/相位签名）、附录 A.2（`THPatch` boss 入口表）整节。原因：boss 阶段结论未真机证实、且与 A 代引擎其它观察冲突。**CSV 未动、其它结论未改；🟡 未真机。** |

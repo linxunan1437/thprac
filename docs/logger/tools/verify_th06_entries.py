@@ -242,8 +242,12 @@ def parse_report_tables(path):
     txt = open(path, encoding='utf-8').read()
 
     def slab(title, nxt):
+        # 2026-10-27：boss 附录（原 §14 附录 D）已按用户裁决从报告中删除；
+        # 标题缺失时返回空串，调用方按空表处理（不再做 boss 交叉核对）。
+        if title not in txt:
+            return ''
         a = txt.index(title)
-        b = txt.index(nxt)
+        b = txt.index(nxt) if nxt in txt else len(txt)
         return txt[a:b]
 
     def cells(line):
@@ -438,9 +442,15 @@ def main():
     # 4) 与 E1 附录 C / D 逐行比对 --------------------------------------------
     print('\n== 与 E1 附录 C/D 逐行比对（docs/th06/th06_ecl_re_report.md）==')
     apc, apd = parse_report_tables(REPORT_PATH)
-    print('附录 C 行数 %d（期望 40）/ 附录 D 行数 %d（期望 70）' % (len(apc), len(apd)))
-    if (len(apc), len(apd)) != (40, 70):
-        fail.append('附录 C/D 表格行数不是 40/70')
+    has_d = '## 14. 附录 D' in open(REPORT_PATH, encoding='utf-8').read()
+    if has_d:
+        print('附录 C 行数 %d（期望 40）/ 附录 D 行数 %d（期望 70）' % (len(apc), len(apd)))
+        if (len(apc), len(apd)) != (40, 70):
+            fail.append('附录 C/D 表格行数不是 40/70')
+    else:
+        print('附录 C 行数 %d（期望 40）；附录 D 已于 2026-10-27 撤下，跳过 boss 交叉核对' % (len(apc),))
+        if len(apc) != 40:
+            fail.append('附录 C 表格行数不是 40')
 
     c_bad, c_ok = [], 0
     for (stage, portion), (w, off, t, op) in sorted(apc.items()):
@@ -584,10 +594,10 @@ def main():
         return 1
     print('PASS：109 行 = 章节 %d + boss %d（已填 109/109，格式 `时间值/0x偏移`，'
           '**同一 section 多 warp 时取非 dlg**）；逐关 12/10/16/17/13/13/28；'
-          '章节各关 6,4,7,8,5,2,7；与 E1 附录 C(40)/D(70) 逐行一致'
-          '（其中 %d 行为「附录 D 记 dlg 变体、CSV 取非 dlg」的口径差异，已登记）；'
+          '章节各关 6,4,7,8,5,2,7；与 E1 附录 C(40) 逐行一致；'
+          '附录 D（boss）已于 2026-10-27 撤下，未做交叉核对；'
           'ST4 BOOKS 保留、ST4 前半 #4 已删（同 3392/0xCDD4）'
-          % (EXPECT_CHAP, EXPECT_BOSS, len(dlg_diff)))
+          % (EXPECT_CHAP, EXPECT_BOSS))
     return 0
 
 
