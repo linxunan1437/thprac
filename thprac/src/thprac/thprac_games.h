@@ -7,6 +7,8 @@
 #include <vector>
 #include <unordered_map>
 #include <optional>
+#include <cstring>
+#include <cstdint>
 #define BOSS_MOVE_DOWN_RANGE_INIT 0.5
 
 struct IDirect3DDevice8;
@@ -442,6 +444,125 @@ bool CloneReplayWithParams(const std::wstring& rep_path, const std::string& para
         }                                                                                  \
         param.AddMember(rapidjson::Value(#value_name, jalloc), json_##value_name, jalloc); \
     }
+
+#pragma endregion
+
+#pragma region Game Session Log
+
+// 一局游玩 = 一行 JSON，按月追加到数据目录（口径见 docs/req_logger.md）。
+// 热路径（VEH 回调）里只允许调用 Begin / Tick / Latch / PushEvent：它们不碰堆、不做文件 IO。
+// 序列化与写盘全部收在 Flush() 里，一局至多一次。
+
+enum class GameLogEventType : int8_t { Miss, Bomb, Break, Interrupt };
+
+// 事件类型 → JSON 字符串。用 switch 而非二元三元表达式：后者对任何非 Miss 的
+// 值都输出 "bomb"，新增枚举值时会静默错标；switch 漏写 case 则落到末尾兜底，
+// 输出显眼的 "?"（MSVC 的 C4062 只在 /Wall 下报，本工程 /W4 不报，指望不上编译器）。
+inline const char* GameLogEventTypeName(GameLogEventType type)
+{
+    switch (type) {
+    case GameLogEventType::Miss:
+        return "miss";
+    case GameLogEventType::Bomb:
+        return "bomb";
+    case GameLogEventType::Break:
+        return "break";
+    case GameLogEventType::Interrupt:
+        return "interrupt";
+    }
+    return "?";
+}
+
+struct GameLogEvent {
+    GameLogEventType type;
+    const char* checkpoint; // 不拥有；指向冻结字符串或字面量 "main"
+};
+
+struct GameSessionData {
+    SYSTEMTIME start {};
+    bool hasStart = false;
+    char shot[24] {}; // 机体类型显示名；th18 暂无来源，留空
+    const char* startCheckpoint = nullptr; // 首次 latch；nullptr ⇒ 输出 "main"
+    const char* endCheckpoint = nullptr; // 最后一次 latch
+    int32_t checkpointCount = 0;
+    static constexpr int32_t kMaxEvents = 256;
+    GameLogEvent events[kMaxEvents] {};
+    int32_t eventCount = 0;
+    int32_t droppedEvents = 0;
+    // 单章节练习合并计数（口径见 docs/req_logger.md §落地口径 11）：
+    // total = 本行合并进来的尝试数，got = 其中无 miss/bomb 的次数。
+    // 仅「单章节」行会置非 0；total == 0 时两个字段整对从 JSON 省略。
+    int32_t total = 0;
+    int32_t got = 0;
+};
+
+// 一局的边界 = *_game_start（开新局，含重开）与 PLAYER_PTR 由非 0 变 0（一局结束）。
+// PLAYER_PTR 判据与各作 IGI 面板的显隐判据同源。
+class GameSession {
+public:
+    void Begin(const char* gameId); // *_game_start；上一局还开着就先转待落盘
+    void Tick(bool inGame, const char* shot = nullptr); // 每帧 Update 顶部（早于所有 early return）
+    void Latch(const char* record); // 每帧 Update 末尾
+    void PushEvent(GameLogEventType type, const char* checkpoint);
+
+    // 本局还没取到起始信息（时间/机体）——调用方据此决定是否值得去读机体地址。
+    bool NeedsStartInfo() const { return mOpen && !mCur.hasStart; }
+
+    // 本帧是「退出游戏」的下降沿（上一帧在局内、本帧 PLAYER_PTR 变 0）——与 Tick 内部的
+    // 一局结束判据（mWasInGame && !inGame）同源。各作在 Tick **之前**调用，据此补记退出类
+    // 事件（如 interrupt）：Tick 会在同一帧把本局快照转待落盘并写盘，之后再 PushEvent 就
+    // 补不进这一局了。
+    bool IsGameExitEdge(bool inGame) const { return mOpen && mWasInGame && !inGame; }
+
+private:
+    void Flush(const GameSessionData& data);
+    // 单章节练习合并：同起始 checkpoint 的连续练习局并入同一行（口径 11）。
+    void MergeOrAppend(const GameSessionData& data);
+
+    GameSessionData mCur;
+    GameSessionData mPending;
+    const char* mGameId = nullptr;
+    bool mOpen = false;
+    bool mHasPending = false;
+    bool mWasInGame = false;
+
+    // 合并基线 = 上一次写入的那一行。纯内存态，进程重启即失效（口径 11）。
+    // data 保留「首条」记录的全部字段（就地改写时只覆盖 total/got）。
+    // 里面的 const char* 只允许指向各作 mEntries 的冻结串或字面量 "main"，永不下垂。
+    struct MergeBase {
+        bool valid = false;
+        uint64_t offset = 0; // 该行行首在文件中的偏移
+        uint32_t length = 0; // 含 '\n' 的行长
+        int32_t total = 0;
+        int32_t got = 0;
+        int32_t monthKey = 0; // 写入该行时的 年*12+月
+        GameSessionData data {};
+    };
+    MergeBase mMergeBase;
+};
+
+// "main" 是唯一的非 checkpoint 哨兵（req §监控功能 3）。
+inline const char* GameLogRecordOfSection(const char* section)
+{
+    return (section && std::strcmp(section, "main") != 0) ? section : nullptr;
+}
+
+// 写盘结果。GuardFailed = 一个字节都没动过文件（调用方可安全改成追加）；
+// IoFailed = 文件已打开、可能已写坏（调用方应改用追加兜底，而不是重试改写）。
+struct GameSessionWriteResult {
+    enum class Status : int8_t { Ok, GuardFailed, IoFailed };
+    Status status = Status::IoFailed;
+    uint64_t offset = 0; // 行首在文件中的偏移，仅 Ok 有效
+    uint32_t length = 0; // 含 '\n' 的行长，仅 Ok 有效
+    bool Ok() const { return status == Status::Ok; }
+};
+
+GameSessionWriteResult GameSessionAppendJsonLine(const char* gameId, const GameSessionData& data);
+
+// 就地改写 [offset, offset + length) 这一段，前提是它仍是文件最后一行。
+// 仅单章节练习合并使用；月份后缀在改写时刻重算，跨月自然失败。
+GameSessionWriteResult GameSessionRewriteJsonLine(uint64_t offset, uint32_t length,
+    const char* gameId, const GameSessionData& data);
 
 #pragma endregion
 
