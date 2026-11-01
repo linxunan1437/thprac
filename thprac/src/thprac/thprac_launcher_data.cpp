@@ -35,6 +35,9 @@ namespace THPrac {
 // Checkpoint tables are compiled into the game translation units (see
 // thprac_thXX_checkpoints_gen.cpp). The launcher reads the same verbatim CSV
 // strings the in-game logger uses, so the two can never disagree.
+namespace TH06 { extern const char kTh06CheckpointsCsv[]; }
+namespace TH07 { extern const char kTh07CheckpointsCsv[]; }
+namespace TH08 { extern const char kTh08CheckpointsCsv[]; }
 namespace TH10 { extern const char kTh10CheckpointsCsv[]; }
 namespace TH11 { extern const char kTh11CheckpointsCsv[]; }
 namespace TH12 { extern const char kTh12CheckpointsCsv[]; }
@@ -988,6 +991,9 @@ struct CheckpointSource {
 };
 
 static const CheckpointSource kCheckpointSources[] = {
+    { "th06", TH06::kTh06CheckpointsCsv },
+    { "th07", TH07::kTh07CheckpointsCsv },
+    { "th08", TH08::kTh08CheckpointsCsv },
     { "th10", TH10::kTh10CheckpointsCsv },
     { "th11", TH11::kTh11CheckpointsCsv },
     { "th12", TH12::kTh12CheckpointsCsv },
@@ -2574,7 +2580,7 @@ struct FullRunTable {
 };
 
 // th16 的 ST6 末尾有 SPRING/SUMMER/AUTUMN/WINTER 四个最终关，均可作为全关终点；
-// 其余作品仍只取行序最后一条 ST6。
+// th08 的 ST6A / ST6B 分别取各路线的最后一条；其余作品只取最后一条 ST6。
 static constexpr int kTh16FullRunEndCount = 4;
 
 static bool LoadFullRunTable(const std::string& game, FullRunTable& table)
@@ -2585,6 +2591,18 @@ static bool LoadFullRunTable(const std::string& game, FullRunTable& table)
         return false;
 
     table.first = table.names.front();
+    if (game == "th08") {
+        for (const char* route : { "ST6A ", "ST6B " }) {
+            for (auto it = table.names.rbegin(); it != table.names.rend(); ++it) {
+                if (it->compare(0, 5, route) == 0) {
+                    table.endCheckpoints.push_back(*it);
+                    break;
+                }
+            }
+        }
+        table.valid = !table.first.empty() && !table.endCheckpoints.empty();
+        return table.valid;
+    }
     const int endCount = game == "th16" ? kTh16FullRunEndCount : 1;
     for (auto it = table.names.rbegin(); it != table.names.rend()
          && (int)table.endCheckpoints.size() < endCount; ++it) {

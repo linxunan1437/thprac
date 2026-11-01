@@ -1,6 +1,10 @@
 ﻿#include "thprac_games.h"
 #include "thprac_utils.h"
 #include <format>
+#include <algorithm>
+#include <cstring>
+#include <sstream>
+#include "..\3rdParties\rapidcsv\rapidcsv.h"
 #include "thprac_th08_rsqrt.h"
 
 #include <xmmintrin.h>
@@ -980,7 +984,242 @@ namespace TH08 {
         Gui::GuiHotKey mInGameInfo { THPRAC_INGAMEINFO, "F8", VK_F8 };
     };
 
-    
+    // Embedded whitelist: regenerated from docs/logger/th08_checkpoints.csv and
+    // the independently checked L/Extra phase map; native spell practice is excluded.
+    extern const char kTh08CheckpointsCsv[];
+    extern const char kTh08BossPhasesCsv[];
+
+    class TH08Logger {
+        SINGLETON(TH08Logger)
+    public:
+        void OnGameStart()
+        {
+            const int file = *reinterpret_cast<const int32_t*>(0x164D2CC);
+            // Preserve a full run across forward stage loads; a same-file retry
+            // or a new run after leaving gameplay must start another session.
+            if (thPracParam.mode || !mWasInGame || mFileIndex < 0 || file <= mFileIndex)
+                mSession.Begin("th08");
+            ResetStage();
+            mFileIndex = -1;
+            mStartPending = true;
+        }
+        void OnMiss()
+        {
+            if (!(*reinterpret_cast<const uint32_t*>(0x164D0B4) & 0x4000))
+                mSession.PushEvent(GameLogEventType::Miss, GameLogRecordOfSection(mSection));
+        }
+        void OnBomb()
+        {
+            if (!(*reinterpret_cast<const uint32_t*>(0x164D0B4) & 0x4000))
+                mSession.PushEvent(GameLogEventType::Bomb, GameLogRecordOfSection(mSection));
+        }
+        void OnStageClear() { mStageClear = true; }
+        const char* CurrentSection() const { return mSection; }
+        void Update();
+
+    private:
+        struct Chapter {
+            std::string stage, record;
+            uint32_t offset;
+        };
+        struct Phase {
+            std::string stage, record;
+            uint16_t sub;
+        };
+        TH08Logger();
+        void ResetStage()
+        {
+            mSection = "main";
+            mPending = nullptr;
+            mPendingFrames = 0;
+            mChapterFloor = 0;
+            mLastTimeline = 0;
+            mStageClear = false;
+        }
+        const char* PhaseOf(uint16_t sub, uint16_t subCount) const;
+        const char* SampleBoss(uintptr_t host, uint16_t subCount) const;
+        std::vector<Chapter> mChapters;
+        std::vector<Phase> mPhases;
+        const char* mStageKey = "";
+        const char* mSection = "main";
+        const char* mPending = nullptr;
+        int mPendingFrames = 0;
+        int mFileIndex = -1;
+        uint32_t mLastTimeline = 0;
+        uint32_t mChapterFloor = 0;
+        bool mWasInGame = false;
+        bool mStartPending = false;
+        bool mStageClear = false;
+        GameSession mSession;
+    };
+
+    TH08Logger::TH08Logger()
+    {
+        try {
+            std::istringstream input(kTh08CheckpointsCsv);
+            rapidcsv::Document csv(input, rapidcsv::LabelParams(0, -1));
+            for (size_t i = 0; i < csv.GetRowCount(); ++i) {
+                const auto row = csv.GetRow<std::string>(i);
+                if (row.size() < 4 || row[1] != "th08" || row[3].find('#') == std::string::npos)
+                    continue;
+                const auto slash = row[0].find('/');
+                if (slash == std::string::npos)
+                    continue;
+                const auto offset = static_cast<uint32_t>(std::stoul(row[0].substr(slash + 1), nullptr, 16));
+                mChapters.push_back({ row[2], row[3], offset });
+            }
+            std::sort(mChapters.begin(), mChapters.end(), [](const Chapter& a, const Chapter& b) {
+                return a.offset < b.offset;
+            });
+            std::istringstream phaseInput(kTh08BossPhasesCsv);
+            rapidcsv::Document phases(phaseInput, rapidcsv::LabelParams(0, -1));
+            for (size_t i = 0; i < phases.GetRowCount(); ++i) {
+                const auto row = phases.GetRow<std::string>(i);
+                if (row.size() == 3)
+                    mPhases.push_back({ row[0], row[2], static_cast<uint16_t>(std::stoul(row[1])) });
+            }
+        } catch (...) {
+            mChapters.clear();
+            mPhases.clear();
+        }
+    }
+
+    const char* TH08Logger::PhaseOf(uint16_t sub, uint16_t subCount) const
+    {
+        if (sub >= subCount)
+            return nullptr;
+        for (const auto& phase : mPhases)
+            if (phase.stage == mStageKey && phase.sub == sub)
+                return phase.record.c_str();
+        return nullptr;
+    }
+
+    const char* TH08Logger::SampleBoss(uintptr_t host, uint16_t subCount) const
+    {
+        // Static EnemyManager array. Never follow an arbitrary/stale Boss pointer.
+        constexpr uintptr_t first = 0x57D2F0;
+        constexpr uintptr_t stride = 0x53D0;
+        if (host < first || host >= first + stride * 480 || (host - first) % stride)
+            return nullptr;
+        if ((*reinterpret_cast<const uint32_t*>(host + 0x3324) & 3) != 3)
+            return nullptr;
+        const auto* current = PhaseOf(*reinterpret_cast<const uint16_t*>(host + 0xA1C), subCount);
+        // Frame-end sampling: the main cursor must use its COMMITTED depth.
+        // 2CEA may still contain the last async cursor's working depth.
+        const int depth = *reinterpret_cast<const int16_t*>(host + 0x2CE8);
+        if (depth < 0 || depth > 16)
+            return current;
+        for (int i = depth - 1; !current && i >= 0; --i)
+            current = PhaseOf(*reinterpret_cast<const uint16_t*>(host + 0xA20 + i * 0x228 + 0x224), subCount);
+        return current;
+    }
+
+    void TH08Logger::Update()
+    {
+        const uint32_t state = *reinterpret_cast<const uint32_t*>(GAMEMODE_ADDR);
+        const uint32_t flags = *reinterpret_cast<const uint32_t*>(0x164D0B4);
+        // Native spell practice loads *sp ECL files with a different sub table.
+        // It includes LW; neither is allowed to match the normal-stage whitelist.
+        const bool nativeSpellPractice = (flags & 0x4000) != 0;
+        const bool inGame = !nativeSpellPractice && (state == 2 || (!thPracParam.mode && state == 3));
+        if (inGame && (!mWasInGame || mStartPending)) {
+            if (!mStartPending) {
+                mSession.Begin("th08");
+                ResetStage();
+                mFileIndex = -1;
+            }
+            mStartPending = false;
+        }
+        if (mSession.IsGameExitEdge(inGame) && !mStageClear)
+            mSession.PushEvent(GameLogEventType::Interrupt, GameLogRecordOfSection(mSection));
+        const uint8_t shot = *reinterpret_cast<const uint8_t*>(SHOTTYPE_ADDR);
+        const char* shotName = inGame && mSession.NeedsStartInfo() && shot < 12 ? S(IGI_PL_08[shot]) : nullptr;
+        mSession.Tick(inGame, shotName);
+        mWasInGame = inGame;
+        if (!inGame) {
+            ResetStage();
+            mFileIndex = -1;
+            return;
+        }
+        if (state != 2)
+            return;
+
+        static constexpr const char* stages[] = { "ST1", "ST2", "ST3", "ST4A", "ST4B", "ST5", "ST6A", "ST6B", "ST7" };
+        const int fileIndex = *reinterpret_cast<const int32_t*>(0x164D2CC);
+        if (fileIndex < 0 || fileIndex >= static_cast<int>(std::size(stages)))
+            return;
+        if (fileIndex != mFileIndex) {
+            ResetStage();
+            mFileIndex = fileIndex;
+            mStageKey = stages[fileIndex];
+        }
+        // The existing pause flag is stable across pause menu open/close.
+        if (*reinterpret_cast<const uint8_t*>(0x164D0BA))
+            return;
+        const uintptr_t code = *reinterpret_cast<const uint32_t*>(0x4ECCB8);
+        if (!code || *reinterpret_cast<const uint32_t*>(code) != 0x800)
+            return;
+        const uint16_t subCount = *reinterpret_cast<const uint16_t*>(code + 4);
+        const uint16_t lanes = *reinterpret_cast<const uint16_t*>(code + 6);
+        if (!subCount || subCount > 1024 || !lanes || lanes > 16)
+            return;
+        const uintptr_t timeline = *reinterpret_cast<const uint32_t*>(0xF54CFC);
+        const uint32_t offset = timeline >= code ? static_cast<uint32_t>(timeline - code) : 0;
+        // All included normal ECL files are below 0x20000 bytes.
+        if (!offset || offset >= 0x20000)
+            return;
+        if (mLastTimeline && offset + 0x100 < mLastTimeline) {
+            // Defensive fallback for a same-state retry; OnGameStart is primary.
+            mSession.Begin("th08");
+            ResetStage();
+        }
+        mLastTimeline = offset;
+
+        const int diff = *reinterpret_cast<const int32_t*>(DIFF_ADDR);
+        const bool phaseSupported = fileIndex == 8 ? diff == 4 : diff == 3;
+        const char* candidate = nullptr;
+        bool bossPresent = false;
+        // Slot1 is used by ST6A Last Spell. Prefer its valid phase during handoff.
+        for (int slot = 1; slot >= 0; --slot) {
+            const uintptr_t host = *reinterpret_cast<const uint32_t*>(0xF54CC0 + slot * 4);
+            constexpr uintptr_t first = 0x57D2F0, stride = 0x53D0;
+            if (host < first || host >= first + stride * 480 || (host - first) % stride
+                || (*reinterpret_cast<const uint32_t*>(host + 0x3324) & 3) != 3)
+                continue;
+            bossPresent = true;
+            if (phaseSupported && !candidate)
+                candidate = SampleBoss(host, subCount);
+        }
+        uint32_t chapterOffset = 0;
+        if (!bossPresent) {
+            // Only already-latched chapter entries form the floor. The timeline
+            // pointer is NEXT-to-execute, and may already point at the post-MID
+            // chapter while the Boss is still alive; never use it as the floor.
+            for (const auto& chapter : mChapters) {
+                if (chapter.stage == mStageKey && chapter.offset <= offset && chapter.offset > mChapterFloor) {
+                    candidate = chapter.record.c_str();
+                    chapterOffset = chapter.offset;
+                }
+            }
+        }
+        if (!candidate || std::strcmp(candidate, mSection) == 0) {
+            mPending = nullptr;
+            mPendingFrames = 0;
+        } else if (mPending && std::strcmp(candidate, mPending) == 0) {
+            if (++mPendingFrames >= 2) {
+                mSection = candidate;
+                if (chapterOffset)
+                    mChapterFloor = chapterOffset;
+                mPending = nullptr;
+                mPendingFrames = 0;
+            }
+        } else {
+            mPending = candidate;
+            mPendingFrames = 1;
+        }
+        mSession.Latch(GameLogRecordOfSection(mSection));
+    }
+
     class TH08InGameInfo : public Gui::GameGuiWnd {
 
         TH08InGameInfo() noexcept
@@ -1051,6 +1290,10 @@ namespace TH08 {
             ImGui::Text(S(THPRAC_INGAMEINFO_BOMB_COUNT));
             ImGui::NextColumn();
             ImGui::Text("%8d", mBombCount);
+            ImGui::NextColumn();
+            ImGui::TextUnformatted("Section");
+            ImGui::NextColumn();
+            ImGui::TextUnformatted(TH08Logger::singleton().CurrentSection());
             ImGui::NextColumn();
             ImGui::Text(S(THPRAC_INGAMEINFO_08_SC_COUNT));
             ImGui::NextColumn();
@@ -3208,6 +3451,7 @@ namespace TH08 {
         THGuiPrac::singleton().Update();
         THGuiRep::singleton().Update();
         THOverlay::singleton().Update();
+        TH08Logger::singleton().Update();
         TH08InGameInfo::singleton().Update();
 
         if (g_adv_igi_options.show_keyboard_monitor && (GetMemContent(GAMEMODE_ADDR) == 2)) {
@@ -3241,6 +3485,7 @@ namespace TH08 {
     HOOKSET_DEFINE(THInGameInfo)
     EHOOK_DY(th08_enter_game, 0x43BDD2, 5, { // set inner misscount to 0
     
+        TH08Logger::singleton().OnGameStart();
         TH08InGameInfo::singleton().mLSCCount = 0;
         TH08InGameInfo::singleton().mSCCount = 0;
         TH08InGameInfo::singleton().mBombCount = 0;
@@ -3267,6 +3512,16 @@ namespace TH08 {
         }
     })
     EHOOK_DY(th08_player_bomb, 0x44CA94, 6, {
+        TH08Logger::singleton().OnBomb();
+    })
+    EHOOK_DY(th08_logger_deathbomb, 0x44CA83, 6, { // all successful deathbomb branches
+        TH08Logger::singleton().OnBomb();
+    })
+    EHOOK_DY(th08_logger_miss, 0x44CD29, 5, { // sole call to decrement life / increment miss count
+        TH08Logger::singleton().OnMiss();
+    })
+    EHOOK_DY(th08_logger_stage_clear, 0x439C1F, 10, { // clear-state 2 -> 3, before practice/ending dispatch
+        TH08Logger::singleton().OnStageClear();
     })
     EHOOK_DY(th08_player_bomb, 0x44CA6A, 3, {//deadbomb
     })
@@ -3316,6 +3571,7 @@ namespace TH08 {
         THGuiPrac::singleton();
         THGuiRep::singleton();
         THOverlay::singleton();
+        TH08Logger::singleton();
         TH08InGameInfo::singleton();
 
         // Hooks

@@ -3,6 +3,12 @@
 #include "thprac_th07.h"
 #include "thprac_games_dx8.h"
 #include <format>
+#include "..\3rdParties\rapidcsv\rapidcsv.h"
+#include <algorithm>
+#include <cstring>
+#include <sstream>
+#include <string>
+#include <vector>
 
 
 namespace THPrac {
@@ -612,6 +618,316 @@ namespace TH07 {
         Gui::GuiHotKey mInGameInfo { THPRAC_INGAMEINFO, "F8", VK_F8 };
     };
 
+    extern const char kTh07CheckpointsCsv[];
+    extern const char kTh07BossPhasesCsv[];
+
+    // Static L / Extra / Phantasm phase dictionary. See th07_monitor_impl_report.md.
+    class TH07Logger {
+        SINGLETON(TH07Logger)
+    public:
+        void OnStageStart()
+        {
+            mStageStartPending = true;
+            mStartMiss = globals ? static_cast<int>(globals->miss_count) : 0;
+            mStartBomb = globals ? static_cast<int>(globals->bombs_used) : 0;
+        }
+        const char* CurrentSection() const { return mSection; }
+        void Update();
+
+    private:
+        struct Chapter {
+            int stage;
+            int time;
+            std::string record;
+        };
+        struct Phase {
+            int stage;
+            int difficulty;
+            uint16_t sub;
+            uint16_t controller;
+            int slot;
+            std::string record;
+        };
+        struct BossView {
+            uint16_t subs[16] { };
+            int count = 0;
+        };
+        std::vector<Chapter> mChapters;
+        std::vector<Phase> mPhases;
+        const Chapter* mDeferredChapter = nullptr;
+        const char* mSection = "main";
+        const char* mPending = nullptr;
+        const char* mFinalRecord = nullptr;
+        int mPendingFrames = 0;
+        int mStage = -1;
+        int mLastChapter = -1;
+        bool mWasInGame = false;
+        bool mStageStartPending = false;
+        bool mStageClear = false;
+        bool mHadBoss = false;
+        bool mCountersReady = false;
+        int mMiss = 0;
+        int mBomb = 0;
+        int mStartMiss = 0;
+        int mStartBomb = 0;
+        GameSession mSession;
+
+        TH07Logger()
+        {
+            try {
+                std::istringstream csv(kTh07CheckpointsCsv);
+                rapidcsv::Document doc(csv, rapidcsv::LabelParams(0, -1));
+                for (size_t i = 0; i < doc.GetRowCount(); ++i) {
+                    auto r = doc.GetRow<std::string>(i);
+                    if (r.size() < 4 || r[1] != "th07")
+                        continue;
+                    const bool chapter = r[3].find('#') != std::string::npos || r[3] == "ST6 CHAOS";
+                    if (chapter)
+                        mChapters.push_back({ std::stoi(r[2].substr(2)), std::stoi(r[0]), r[3] });
+                }
+                std::istringstream phases(kTh07BossPhasesCsv);
+                rapidcsv::Document phaseDoc(phases, rapidcsv::LabelParams(0, -1));
+                for (size_t i = 0; i < phaseDoc.GetRowCount(); ++i) {
+                    auto r = phaseDoc.GetRow<std::string>(i);
+                    if (r.size() < 8)
+                        continue;
+                    // Records must remain members of the checkpoint whitelist.
+                    bool found = false;
+                    for (size_t j = 0; j < doc.GetRowCount(); ++j) {
+                        if (doc.GetRow<std::string>(j)[3] == r[5]) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    const int slot = std::stoi(r[4]);
+                    if (found && slot >= -1 && slot < 8)
+                        mPhases.push_back({ std::stoi(r[0]), std::stoi(r[1]),
+                            static_cast<uint16_t>(std::stoi(r[2])), static_cast<uint16_t>(std::stoi(r[3])),
+                            std::stoi(r[4]), r[5] });
+                }
+                std::sort(mChapters.begin(), mChapters.end(), [](const Chapter& a, const Chapter& b) {
+                    return a.stage < b.stage || (a.stage == b.stage && a.time < b.time);
+                });
+            } catch (...) {
+                mChapters.clear();
+                mPhases.clear();
+            }
+        }
+
+        static bool ActiveSister(const BossView& view, uint16_t marker, uint16_t controller)
+        {
+            // An interrupt saves the old body context. A new support root must
+            // hide an older active root left farther out on that same stack.
+            for (int i = 0; i < view.count; ++i) {
+                const uint16_t sub = view.subs[i];
+                const bool root = controller == 44 ? (sub == 58 || sub == 63 || sub == 76 || sub == 79 || sub == 95 || sub == 96 || sub == 97)
+                    : controller == 45             ? (sub == 64 || sub == 67 || sub == 80 || sub == 82 || sub == 98 || sub == 101 || sub == 102)
+                                                   : (sub == 68 || sub == 69 || sub == 83 || sub == 85 || sub == 103 || sub == 106);
+                if (root)
+                    return sub == marker;
+            }
+            return false;
+        }
+        static BossView ReadBoss(int slot, uint16_t subCount)
+        {
+            BossView out;
+            const uintptr_t e = *reinterpret_cast<const uint32_t*>(0x12FE098 + slot * 4);
+            // EnemyManager's fixed 480-entry pool; ignore stale/foreign slots.
+            if (e < 0x9AEA50 || e >= 0x9AEA50 + 480 * 0x4F48 || (e - 0x9AEA50) % 0x4F48)
+                return out;
+            if (*reinterpret_cast<const uint8_t*>(e + 0x2E17) != slot)
+                return out;
+            const int depth = *reinterpret_cast<const int32_t*>(e + 0x2A7C);
+            if (depth < 0 || depth > 15)
+                return out;
+            const auto append = [&](uint16_t sub) { if (sub < subCount) out.subs[out.count++] = sub; };
+            append(*reinterpret_cast<const uint16_t*>(e + 0x8F8));
+            if (!(*reinterpret_cast<const uint8_t*>(e + 0x2E2A) & 0x20)) {
+                for (int i = depth - 1; i >= 0; --i)
+                    append(*reinterpret_cast<const uint16_t*>(e + 0x8FC + i * 0x218 + 0x214));
+            }
+            return out;
+        }
+    };
+
+    void TH07Logger::Update()
+    {
+        const bool inGame = SUPERVISOR->gamemode == 2;
+        const int stage = *reinterpret_cast<const int32_t*>(STAGE_NUM);
+        const bool stageStarting = inGame && mStageStartPending;
+        if (inGame && (mStageStartPending || !mWasInGame)) {
+            // The existing stage-init hook also fires on same-stage fast retry.
+            // A genuine forward stage transition preserves the current session.
+            if (!mWasInGame || stage <= mStage || thPracParam.mode != 0)
+                mSession.Begin("th07");
+            mSection = "main";
+            mPending = nullptr;
+            mPendingFrames = 0;
+            mLastChapter = -1;
+            mDeferredChapter = nullptr;
+            mStageClear = false;
+            mHadBoss = false;
+            mCountersReady = false;
+            mStageStartPending = false;
+            mStage = -1;
+        }
+        if (mSession.IsGameExitEdge(inGame) && !mStageClear)
+            mSession.PushEvent(GameLogEventType::Interrupt, GameLogRecordOfSection(mSection));
+        const int shot = (static_cast<int>(*reinterpret_cast<const uint8_t*>(0x62F645)) << 1)
+            | *reinterpret_cast<const uint8_t*>(0x62F646);
+        mSession.Tick(inGame, inGame && shot >= 0 && shot < 6 ? S(IGI_PL_07[shot]) : nullptr);
+        mWasInGame = inGame;
+        if (!inGame || stage < 1 || stage > 8)
+            return;
+        if (stage != mStage) {
+            mStage = stage;
+            mSection = "main";
+            mPending = nullptr;
+            mPendingFrames = 0;
+            mLastChapter = -1;
+            mDeferredChapter = nullptr;
+            mStageClear = false;
+            mHadBoss = false;
+            mCountersReady = false;
+            mFinalRecord = nullptr;
+            // Every supported stage's last CSV Boss record is its final phase.
+            for (const auto& r : mPhases)
+                if (r.stage == stage)
+                    mFinalRecord = r.record.c_str();
+        }
+        if (stageStarting) {
+            mMiss = mStartMiss;
+            mBomb = mStartBomb;
+            mCountersReady = true;
+        }
+
+        // These cumulative float counters are the same ones used by IGI. A reset
+        // establishes a new baseline, never a burst of synthetic events.
+        if (globals) {
+            const float rawMiss = globals->miss_count;
+            const float rawBomb = globals->bombs_used;
+            if (rawMiss >= 0 && rawMiss < 1000000 && rawBomb >= 0 && rawBomb < 1000000) {
+                const int miss = static_cast<int>(rawMiss), bomb = static_cast<int>(rawBomb);
+                if (mCountersReady) {
+                    if (miss > mMiss && miss - mMiss <= 16)
+                        for (int i = mMiss; i < miss; ++i)
+                            mSession.PushEvent(GameLogEventType::Miss, GameLogRecordOfSection(mSection));
+                    if (bomb > mBomb && bomb - mBomb <= 16)
+                        for (int i = mBomb; i < bomb; ++i)
+                            mSession.PushEvent(GameLogEventType::Bomb, GameLogRecordOfSection(mSection));
+                }
+                mMiss = miss;
+                mBomb = bomb;
+                mCountersReady = true;
+            }
+        }
+
+        const uint32_t code = *reinterpret_cast<const uint32_t*>(0x1347938);
+        if (!code)
+            return;
+        const uint16_t count = *reinterpret_cast<const uint16_t*>(code);
+        if (!count || count > 4096)
+            return;
+        BossView views[8];
+        bool hasBoss = false;
+        for (int k = 0; k < 8; ++k) {
+            views[k] = ReadBoss(k, count);
+            hasBoss |= views[k].count != 0;
+        }
+        if (mHadBoss && !hasBoss && mFinalRecord && std::strcmp(mSection, mFinalRecord) == 0)
+            mStageClear = true;
+        const bool bossEntered = hasBoss && !mHadBoss;
+        mHadBoss = hasBoss;
+        const int diff = GAME_MANAGER->difficulty;
+        const char* candidate = nullptr;
+        uint16_t controller = 0;
+        if (stage == 4) {
+            for (int i = 0; i < views[0].count; ++i) {
+                const auto sub = views[0].subs[i];
+                if ((sub >= 44 && sub <= 49) || sub == 51) {
+                    controller = sub;
+                    break;
+                }
+            }
+        }
+        // A routed row is accepted only when both the controller's current phase
+        // and the active sister's distinct interrupt subtree agree. No fake shot.
+        for (const auto& r : mPhases) {
+            if (r.stage != stage || r.difficulty != diff || !r.controller)
+                continue;
+            if (controller == r.controller && ActiveSister(views[r.slot], r.sub, controller)) {
+                if (candidate && std::strcmp(candidate, r.record.c_str()) != 0) {
+                    candidate = nullptr;
+                    break;
+                }
+                candidate = r.record.c_str();
+            }
+        }
+        if (!candidate) {
+            // Most-inner phase wins; a practice warp can nest phase controllers.
+            for (int k = 0; k < 8 && !candidate; ++k) {
+                for (int i = 0; i < views[k].count && !candidate; ++i) {
+                    for (const auto& r : mPhases) {
+                        if (r.stage == stage && r.difficulty == diff && !r.controller && r.sub == views[k].subs[i]) {
+                            if (stage == 4 && k == 0 && controller && r.sub != controller)
+                                continue;
+                            candidate = r.record.c_str();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        int chapterTime = -1;
+        const int timelineTime = *reinterpret_cast<const int32_t*>(0x12FE0FC);
+        if (bossEntered) {
+            // A direct Boss warp may never have latched an earlier chapter.
+            // Consume only boundaries predating entry. Boundaries reached during
+            // the fight must remain available when the Boss leaves its slot.
+            for (const auto& r : mChapters)
+                if (r.stage == stage && r.time <= timelineTime)
+                    mLastChapter = (std::max)(mLastChapter, r.time);
+            mDeferredChapter = nullptr;
+        }
+        if (hasBoss) {
+            for (const auto& r : mChapters)
+                if (r.stage == stage && r.time <= timelineTime && r.time > mLastChapter
+                    && (!mDeferredChapter || r.time > mDeferredChapter->time))
+                    mDeferredChapter = &r;
+        }
+        if (!candidate && !hasBoss) {
+            if (mDeferredChapter && mDeferredChapter->time > mLastChapter) {
+                candidate = mDeferredChapter->record.c_str();
+                chapterTime = mDeferredChapter->time;
+            }
+            for (const auto& r : mChapters) {
+                if (r.stage == stage && r.time <= timelineTime && r.time > mLastChapter && r.time > chapterTime) {
+                    candidate = r.record.c_str();
+                    chapterTime = r.time;
+                }
+            }
+        }
+        if (!candidate || std::strcmp(candidate, mSection) == 0) {
+            mPending = nullptr;
+            mPendingFrames = 0;
+        } else if (mPending && std::strcmp(candidate, mPending) == 0) {
+            if (++mPendingFrames >= 2) {
+                mSection = candidate;
+                if (chapterTime >= 0) {
+                    mLastChapter = chapterTime;
+                    mDeferredChapter = nullptr;
+                }
+                mPending = nullptr;
+                mPendingFrames = 0;
+                mStageClear = false;
+            }
+        } else {
+            mPending = candidate;
+            mPendingFrames = 1;
+        }
+        mSession.Latch(GameLogRecordOfSection(mSection));
+    }
+
     class TH07InGameInfo : public Gui::GameGuiWnd {
 
         TH07InGameInfo() noexcept
@@ -688,6 +1004,10 @@ namespace TH07 {
             ImGui::NextColumn();
             ImGui::Text("%8d", mBombCount);
             ImGui::NextColumn();
+            ImGui::Text("当前段落");
+            ImGui::NextColumn();
+            ImGui::Text("%s", TH07Logger::singleton().CurrentSection());
+            ImGui::NextColumn();
             ImGui::Text(S(THPRAC_INGAMEINFO_07_BORDER_COUNT));
             ImGui::NextColumn();
             ImGui::Text("%8d", mBorderBreakCount);
@@ -725,7 +1045,7 @@ namespace TH07 {
 
     public:
     };
-    
+
     EHOOK_ST(th07_all_clear_bonus_1, 0x42b3d2, 2, {
         pCtx->Eip = 0x42b3d6;
     });
@@ -2131,6 +2451,7 @@ namespace TH07 {
         }
         g_gamefence = 1;
         thPracParam._playLock = true;
+        TH07Logger::singleton().OnStageStart();
     })
     EHOOK_DY(th07_disable_title, 0x42956b, 5, {
         if (thPracParam.mode == 1 && (thPracParam.section || thPracParam.frame)) {
@@ -2193,6 +2514,7 @@ namespace TH07 {
         THGuiPrac::singleton().Update();
         THGuiRep::singleton().Update();
         THOverlay::singleton().Update();
+        TH07Logger::singleton().Update();
         TH07InGameInfo::singleton().Update();
 
         if (g_adv_igi_options.show_keyboard_monitor && (*(DWORD*)(0x575AA8) == 2)) {

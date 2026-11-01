@@ -246,7 +246,13 @@
     <ClCompile Include="src\thprac\thprac_th07.cpp">
       <Filter>THPrac Games</Filter>
     </ClCompile>
+    <ClCompile Include="src\thprac\thprac_th07_checkpoints_gen.cpp">
+      <Filter>THPrac Games</Filter>
+    </ClCompile>
     <ClCompile Include="src\thprac\thprac_th08.cpp">
+      <Filter>THPrac Games</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thprac\thprac_th08_checkpoints_gen.cpp">
       <Filter>THPrac Games</Filter>
     </ClCompile>
     <ClCompile Include="src\thprac\thprac_th11.cpp">
