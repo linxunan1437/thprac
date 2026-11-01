@@ -15,7 +15,7 @@
 | --- | --- |
 | 数据源 | `<thprac 数据目录>/logger_sessions_YYYYMM.jsonl`；取**最近 3 个存在的月份文件**，坏行/半截行静默跳过 |
 | 查询条件 | `game` + `startCheckpoint` + `endCheckpoint` 三者**精确字符串相等** |
-| 游戏范围 | th10–th18（logger 已接线且 exe 内已有 checkpoint 表；th06–th08 / th09 不在日志范围） |
+| 游戏范围 | th06–th08、th10–th18（logger 已接线且 exe 内已有 checkpoint 表；th07 / th08 未接线，th09 不在日志范围） |
 | checkpoint 表 | 复用各作已编译进 exe 的 `kThXXCheckpointsCsv`（与 logger 同一份 CSV），不复制 `docs/` 数据 |
 | 统计范围 | 最近 10 条 / 最近 20 条（默认）/ 最近一周 / 最近一个月 / 全部 |
 | 练习次数口径 | `attempts = total > 0 ? total : 1`（合并行按次数展开） |
@@ -130,7 +130,7 @@ NN数       = clean
   记录明细（时间 / 机体 / miss 或 NN）
 ```
 
-- 游戏下拉 th10–th18；起点全量、终点只列起点及其之后。
+- 游戏下拉 th06–th08、th10–th18；起点全量、终点只列起点及其之后。
 - 换游戏重置起终点与结果；改起点/终点清空结果；改范围只重算；刷新重读文件并保留当前条件。
 - 首次进入默认取“最新一条记录的作品”，无记录时回退 th14。
 - 配置弹窗：列表模式 / 编辑模式共用同一个模态窗口，避免嵌套弹窗。
@@ -140,7 +140,7 @@ NN数       = clean
 | 项 | hmaker | 本页 |
 | --- | --- | --- |
 | 数据目录 | 硬编码 `%APPDATA%\thprac` | `LauncherGetDataDir()`，支持便携模式 |
-| 游戏范围 | th14–th18 | th10–th18（覆盖本机 th11 数据） |
+| 游戏范围 | th14–th18 | th06–th08、th10–th18（覆盖本机 th11 数据） |
 | miss 口径 | 所有 `events` 一律计入（当时无 `interrupt`） | 排除 `interrupt`，`break` 计入 |
 | 合并行 | 不支持 `total`/`got` | 按 `total`/`got` 展开 |
 | 起终点输入 | Autocomplete（自由输入 + 候选） | 下拉选择 |
@@ -183,3 +183,5 @@ NN数       = clean
 | --- | --- |
 | 2026-10-24 | 建档：实现 launcher「数据 → 单过程」；按 game + 起终点精确匹配最近 3 个月日志，五档范围统计与明细；`interrupt` 不计 miss、`total`/`got` 展开；新增保存配置 / 配置列表 / 编辑 / 删除，配置落盘 `thprac_single_run_configs.json` 且**列表按当前作品过滤**；新增 32 条 locale。**Release\|x86 编译通过。** |
 | 2026-10-24 | 记录结构/解析器抽成共享的 `SessionRecord` / `SessionEvent` / `ParseSessionRecord`，供「单卡」页复用；单过程读取逻辑不变（仍取最近 3 个月文件），新增 `LoadMonthSessionRecords()` 给单卡页按所选月份读取。**无行为变化。** |
+| 2026-10-27 | **登记 th06**：`kCheckpointSources` 增加 `{ "th06", TH06::kTh06CheckpointsCsv }`（`thprac_launcher_data.cpp`），游戏范围扩为 th06、th10–th18。th06 的 109 条记录名与章节/boss 一并可选（起点/终点下拉、配置校验均复用同一份 CSV）。**`Release\|x86` 编译通过；界面未真机核对。** |
+| 2026-11-01 | 随 th07/th08 监控与日志实现登记共享 checkpoint 表，数据页范围扩为 th06–th08、th10–th18；th08 全关终点按 ST6A/ST6B 两条路线分别取末行，界面与新作日志均待真机。保留此前 th06 接入与真机记录。 |

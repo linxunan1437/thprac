@@ -1,13 +1,14 @@
 # TH08 ECL 段落监控 — 逆向结论（Q1–Q9）
 
 > 对应需求：`docs/th08/th08_ecl_re_requests.md`；总括：`docs/logger/logger_re_disasm_overview.md`；结构模板：`docs/th12/th12_ecl_re_report.md`（**只借结构，不借技术结论** —— th08 是 A 代，机制不同）。
+> **2026-11-01 Boss 重查补篇**：`docs/th08/th08_boss_phase_re_report.md`，按 th06 方法独立核对 Boss 槽、三条转阶段路径和104行 L/Extra候选映射；旧撤下分析不恢复。补篇 §2 订正帧末采样：主 cursor 配 `H+0x2CE8` 已提交深度，不能配异步上下文残留的工作深度 `+0x2CEA`。🟡 未真机，不视为 E4 全完成。
 > 二进制：`../exes/th08.exe`，**840704 B**，PE `TimeDateStamp = 1095610188`，`ImageBase = 0x400000`，`RELOCS_STRIPPED`（⇒ **RVA = VA − 0x400000**），`SizeOfImage = 0x14DC000`，`SizeOfCode = 0xB1C00`。
 > `sha256 = 330fbdbf58a710829d65277b4f312cfbb38d5448b3df523e79350b879213d924`（与 `docs/logger/decompile_materials.md` §2 的 `330fbdbf…` 一致；对应 `[th08] 东方永夜抄 (日文版)`）。
 > 节表（本机实测，**注意 `.text` 的 RVA 不是 0**）：`.text` VA `0x402000` / RVA `0x2000` / RawPtr `0x1E00` / RawSize `0xB1C00`；`.rdata` VA `0x4B4000` / RawSize `0x11400`；`.data` VA `0x4C6000` / **VirtualSize `0x1413840`（巨型 BSS，本文的静态全局都在这里面）**；`.data1` VA `0x18DA000`；`.rsrc` VA `0x18DB000`。**VA→文件偏移必须用 `pefile.get_offset_from_rva(VA−0x400000)`**。
 > 引擎代：**A 代（第一代引擎）**；同代参照：th06（E1 见 `docs/th06/th06_ecl_re_report.md`）/ th07。
 > ECL / decl 素材：**本报告撰写时无**；**2026-10-21 已补齐**（`../exes/ecl/th08/ecldata*.ecl` 24 份 + `../exes/ecl_dump/th08/*.decl`，`thecl -d8 -m ECL_MAP_08.txt`）—— **本报告结论未据此复核**（补齐的是**离线具名**能力）。A 代仍无 eclmap（th08 借用 `ECL_MAP_08.txt`）。
 > 方法：`pefile 2024.8.26` + `capstone 5.0.7` **只读静态反汇编**（脚本见「工具与复现」），用「原始字节搜索 + 函数入口整段反汇编 + 跳表/字段位移交叉印证」定位。
-> 状态：**静态定案（🟡 已定案、未真机三态）**。本机为 macOS，**无法编译、无法真机运行，未做任何真机验证**。
+> 状态：**静态定案（🟡 已定案、未真机三态）**。本机现为 Windows；本篇和2026-11-01补篇均只做静态分析，未做真机验证。
 > 地址口径：正文以 **VA** 为主，并标注 **RVA = VA − 0x400000**。
 > 置信度图例：✅ 反汇编直接证实 ｜ 🟡 有强证据但缺一环（显式标注缺口）｜ ❌ 未能定案。
 
@@ -19,7 +20,7 @@
 | --- | --- | --- |
 | **Q1 当前位置** | ✅ **（c）指令指针为主**，且**同时存在（a）sub 索引与（b）时间值**（三者并存于同一 cursor 帧） | `cursor = *(u32*)(host+0x2CA0)`（通常 = `host+0x7F8`）；`cur_ins = *(u32*)(cursor)`（当前指令**绝对地址**，指向 ECL 文件缓冲内）；`cur_time = *(i32*)(cursor+0xC)`；`cur_sub = *(i16*)(cursor+0x224)`；`offset = cur_ins − *(u32*)0x4ECCB8`。**另一套「Timeline」**（thprac `ECLWarp` 写的那个）在 `0xF54CF0`，每 slot 0x10 B，`+8`=time、`+0xC`=指令指针。 |
 | **Q2 sub 表 / 时间轴的关系** | ✅ sub 表存在但**无名字**；Timeline 是**另一套机制**，二者不同 | `pECL = *(u32*)0x4ECCB8`；`subTable = *(u32*)(0x4ECCB8+4)`；`count = *(i16*)(pECL+4)`；`sub_start(id) = *(u32*)(subTable+id*4)`。`call sub`＝opcode **0x34** → `0x421BD0`。Timeline 的 (time, ins) 指向「timeline 命令」（17 项 opcode 表 `0x42AD60`），**不是 sub**。 |
-| **Q3 函数栈** | ✅ **有显式可遍历子调用栈** | 栈基址 `host+0xA20`，**帧长 `0x228`**，深度 `*(i16*)(host+0x2CEA)`，上限 16（`0xF`）；帧 = **调用者 cursor 的快照**（帧 `+0`＝调用者指令地址、`+0x224`＝调用者 sub_id）；当前层是活动 cursor `host+0x7F8`。 |
+| **Q3 函数栈** | ✅ **有显式可遍历子调用栈** | 栈基址 `host+0xA20`，**帧长 `0x228`**，解释器工作深度 `*(i16*)(host+0x2CEA)`，帧末主脚本应使用已提交深度 `host+0x2CE8`，上限 16（`0xF`）；帧 = **调用者 cursor 的快照**（帧 `+0`＝调用者指令地址、`+0x224`＝调用者 sub_id）；当前层是活动 cursor `host+0x7F8`。 |
 | **Q4 主线宿主捕获点** | 🟡 **A 代没有「具名 main 宿主」概念**；ECL 资源是静态单例 `0x4ECCB8`，宿主是静态 manager（`0x577F20`）内嵌的 480 槽对象数组（步长 `0x53D0`） | 捕获点建议：**`0x418450`**（sub setter，命中时 `[ebp+8]`=cursor ⇒ `host = [ebp+8] − 0x7F8`，`[ebp+0xC]`=sub_id，3B 可 EHOOK）或解释器入口 **`0x4184C8`**（`mov eax,[ebp+8]`，3B，`[ebp+8]`=host）。⚠️ **主线宿主究竟是哪一槽，未静态定案**（缺口见 §Q4）。 |
 | **Q5 解释器命中点** | ✅ ECL 主解释器 = **`0x4184B0`–`0x41ECBD`**；opcode 跳表 `0x41ECBE`（`0xB8` 项，opcode `1..0xB8`） | thprac 现用的 `0x41CB32`（op 0x84）/`0x41C44F`（op 0x7F）**可复用**（命中时 `[ebp+8]`=host、`[ebp−0xC]`=当前指令），但**只在执行到该 opcode 时命中**；`0x42F34D` 只是一个 3B setter（**与当前位置无关，不可复用**）；`0x437AF3` 在初始化/复位路径，非每帧。**推荐：不挂 VM 钩子**，在 IGI 渲染时直接读宿主 `+0x7F8`。 |
 | **Q6 名字来源** | ✅ **运行期不保留 sub 名** | ECL 文件头只有**偏移表**（`buf+0x48`，`count = *(i16*)(buf+4)`）；加载器 `0x418330` 全文无名字解析；exe 内除文件名字符串外**无任何 sub 名串**。⇒ 只能离线做「偏移 ↔ 段落」映射（用 thprac 自己的 warp 表，见 §附录）。 |
@@ -74,7 +75,7 @@ OBJ + 0x7F8 = cursor 帧（★「当前执行到哪」就在这里；**主 curso
       cursor + 0x070 = u32[8] sub 局部寄存器组（call 时从 ECLSRC+0x168 拷入）
       cursor + 0x220 = i32  本 cursor 的序号（ret 时用 `序-1` 索引 OBJ+0x3384，见 0x421D08）
       cursor + 0x224 = i16  当前 sub_id                                                 ★Q1(a)
-OBJ + 0xA20 = 子调用栈基址（帧数组）；帧长 0x228；深度 = *(i16*)(OBJ+0x2CEA)（上限 16）
+OBJ + 0xA20 = 子调用栈基址（帧数组）；帧长 0x228；解释器工作深度 = *(i16*)(OBJ+0x2CEA)，帧末主深度 = *(i16*)(OBJ+0x2CE8)（上限 16）
 OBJ + 0x2CA0 = u32  「当前 cursor」指针（解释器入口 0x4184E5 置为 OBJ+0x7F8；
                     0x41EC2E 一类路径会改为 OBJ+0x3384[i]+8 —— 见下）
 OBJ + 0x2CA4 = u32  「栈基址」指针（解释器入口 0x4184D3 置为 OBJ+0xA20；同上会被改为 +0x230）
@@ -434,7 +435,7 @@ int16_t  esub   = *(int16_t*)(cursor + 0x224);       // 当前 sub_id
   00421db9  b98a000000        mov   ecx, 0x8a
   00421dbe  f3a5              rep movsd                           ; ★ 帧 → cursor（恢复）
   ```
-- **遍历规则**：
+- **遍历规则**（以下为解释器内的工作状态；帧末主脚本采样改用 `host+0x2CE8` 已提交深度，见 Boss 补篇 §2）：
   ```cpp
   int depth = *(int16_t*)(host + 0x2CEA);              // ≥0；上限 16
   for (int d = 0; d < depth && d < 16; ++d) {
@@ -444,7 +445,7 @@ int16_t  esub   = *(int16_t*)(cursor + 0x224);       // 当前 sub_id
   }
   // 当前层 = *(u32*)(host+0x2CA0) 指向的 cursor（通常 = host+0x7F8；活动 cursor，不在帧数组里）
   ```
-- ⚠️ **按总括 §6 Q9，函数栈「不参与」段落判定**（本项只作逆向事实记录）。且 `0x421C06` 存在「flags bit0x1A 置位时不压栈」的分支（推测为「叶/内联调用」形态），遍历时应以 depth 与 `frame+0x224` 合法性做保护。
+- ⚠️ 总括 §6 Q9 是 B/C 代段落规则；2026-11-01 A 代 Boss 补篇提出参照 th06 的「阶段白名单、栈由内向外」候选方案，🟡 未真机。`0x421C06` 存在「flags bit0x1A 置位时不压栈」的分支，遍历时应以配对上下文的 depth 与 `frame+0x224` 合法性做保护。
 
 ---
 
@@ -621,6 +622,8 @@ int16_t  esub   = *(int16_t*)(cursor + 0x224);       // 当前 sub_id
 
 原 boss 入口表（按 `TH08_ST*` 枚举的 `(time, offset)` 与补丁对）整节删除；boss 阶段判定结论**一律作废**，重做前不得引用。CSV 的 121 行 boss 记录原样保留（仅作输入）。
 
+2026-11-01 独立重查见 `th08_boss_phase_re_report.md`：104个非LW记录有 L/Extra候选 sub 字节证据，但尚未闭合全部分支与真机验证，不以本附录旧表为依据。
+
 ### A.3 `STDStage4Fix` / `STDJump`（独立 STD 时间轴，**不入 checkpoint 表**）
 
 ```text
@@ -669,3 +672,4 @@ STDStage4Fix(): std[0xED8]=1, std[0xF14]=1（+ 末符卡时 0x1394/0xF48 各写�
 | 2026-10-22 | **E3/E4 回填 + 读取面订正**（地址/结论数值未改）。CSV 第 1 列回填 **141/158**（章节 37 + boss 104；`LW 1..17` 按用户决定留空、不算缺口）。**§9.2 重写**：141 个 warp offset 全量复算后**全部落在时间轴车道命令区**、与 sub 指令链交集为空（9 关逐一 = ∅）⇒ 原「读宿主 cursor `cur_ins−pECL` 精确匹配」**作废**，改读 **Timeline 车道**（`slot+8`=time、`slot+0xC`=命令指针）；匹配键定为 **offset 单键**，`time` 仅作可读性（实测 39 行 time 与落点命令 t 不等：章节 +60/+90/−339、LS +1）。**§0 Q9 行同步**。**附录 A.1 标签订正**：`stN` 是 `THStageWarp` 的 `stage` 实参，`st4..st9`＝`ST4A/ST4B/ST5/ST6A/ST6B/ST7(Extra)`，原「`st9`（LW?）」错误（LW 无 chapter case）。逐行权威表见 `docs/th08/th08_checkpoint_entry_report.md`。**未真机（🟡）。** |
 | 2026-10-22 | **补「两级判定」交叉引用**：§9.2 第 5 条重写 —— 一级键（车道 `(time,offset)`）在 boss 段大量重复（141 行 67 个不同值），须二级读 boss 宿主 cursor 的 `(sub_id, 脚本时间)`；并明确 **th08 不能用「补丁 offset 升序切区间」**（偏移不按相位单调，`ST1 BOSS2`@`0x3d30` 晚于 `BOSS3/BOSS4`@`0x3d08`，且分别为 jump `0x4E0C` / call sub 33）。完整口径见 `docs/th08/th08_checkpoint_entry_report.md` §9。**结论/地址未改；🟡 未真机。** |
 | 2026-10-27 | **删除全部 boss 阶段相关内容**：§9.2 第 5 条（boss 两级判定/相位签名）、附录 A.2（`THPatch` boss 入口表）整节。原因：boss 阶段结论未真机证实、且与 A 代引擎其它观察冲突。**CSV 未动、其它结论未改；🟡 未真机。** |
+| 2026-11-01 | 独立 Boss 重查补篇：Boss 槽0/1、三条阶段切换路径及104行 L/Extra候选映射；订正帧末主cursor应配已提交深度2CE8，旧工作深度2CEA只适合解释器内配对读取；17 LW不变，未真机，不记E4全完成。 |

@@ -16,7 +16,7 @@
 | 数据源 | `<数据目录>logger_sessions_YYYYMM.jsonl`；**只读所选月份**，坏行/半截行静默跳过 |
 | 月份选择 | 与「练习量」一致：默认当前月；当前月无文件时回落最新存在的月份并提示；切月重读该月文件 |
 | 查询条件 | `game` + `startCheckpoint == 所选章节`，且记录为 logger 单章节记录 |
-| 游戏范围 | th10–th18（复用 exe 内嵌 checkpoint CSV） |
+| 游戏范围 | th06–th08、th10–th18（复用 exe 内嵌 checkpoint CSV） |
 | 单章节判据 | `total > 0` 直接视为单章节；旧行无 `total` 时按口径 16 复判（`cpCount==2 && 含interrupt` 或 `cpCount==1 && 不是只有interrupt`） |
 | 章节锚定 | `startCheckpoint`（练习启动段落）；收卡后 `endCheckpoint` 推进到下一段的记录仍归本章节 |
 | 每条记录口径 | `total = total > 0 ? total : 1`；`got = total > 0 ? clamp(got,0,total) : (无 miss/bomb/break ? 1 : 0)` |
@@ -202,3 +202,5 @@ day.rate  = day.total == 0 ? "—" : day.got * 100.0 / day.total
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-24 | 建档：实现 launcher「数据 → 单卡」；顶部游戏/月份/章节，默认当前月、无当前月文件回落最新月；按 `startCheckpoint` 锚定章节，复用 logger 单章节判据；按日聚合 `total`/`got`/收率；新增保存配置 / 配置列表 / 新建 / 编辑 / 删除，配置落盘 `thprac_single_card_configs.json`（`{name,game,chapter}`），列表按当前作品过滤；新增 6 条 locale。**Release\|x86 编译通过；启动冒烟通过；界面待用户核对。** |
+| 2026-10-27 | **登记 th06**：`kCheckpointSources` 增加 `{ "th06", TH06::kTh06CheckpointsCsv }`，游戏范围扩为 th06、th10–th18；章节下拉直接取 th06 CSV 的 109 条记录名。**`Release\|x86` 编译通过；界面未真机核对。** |
+| 2026-11-01 | 随 th07/th08 监控与日志实现登记共享 checkpoint 表，数据页范围扩为 th06–th08、th10–th18；th08 全关终点按 ST6A/ST6B 两条路线分别取末行，界面与新作日志均待真机。保留此前 th06 接入与真机记录。 |

@@ -15,8 +15,8 @@
 | --- | --- |
 | 数据源 | `<thprac 数据目录>/logger_sessions_YYYYMM.jsonl`；**只读所选月份**，坏行/半截行静默跳过 |
 | 列表范围 | **只显示全关记录**（不是当月全部原始记录） |
-| 全关判定 | `startCheckpoint == checkpoint 表第一条记录名` 且 `endCheckpoint == 表中最后一条以 ST6 开头的记录名`（按行序，不按字符串排序）；**th16 例外：最后 4 条 ST6 均为有效终点** |
-| 游戏范围 | th10–th18（exe 内已嵌入 checkpoint 表）；无表/未知作品不判为全关 |
+| 全关判定 | `startCheckpoint == checkpoint 表第一条记录名` 且 `endCheckpoint == 表中最后一条以 ST6 开头的记录名`（按行序，不按字符串排序）；**th16：最后 4 条 ST6 均为有效终点；th08：ST6A/ST6B 各自最后一条均为有效终点** |
+| 游戏范围 | th06–th08、th10–th18（exe 内已嵌入 checkpoint 表）；无表/未知作品不判为全关 |
 | 月份选择 | 默认当前月；当前月无文件回落最新月并提示；切月重读该月文件 |
 | 游戏筛选 | `全部` + 当月实际有全关记录的作品；`全部` 时不显示右侧统计 |
 | 总记录数 | 当前作品在当前月份的全关记录条数 |
@@ -44,10 +44,11 @@
 
 对每条记录：
 
-1. 用 `game` 找 `FindCheckpointSource()`；找不到（未知作品/th06–th08）⇒ 丢弃。
+1. 用 `game` 找 `FindCheckpointSource()`；找不到（未知作品）⇒ 丢弃。
 2. `LoadCheckpointNames()` 取 CSV 第 4 列“记录名”，保留行序。
 3. `first = names.front()`；`endCheckpoints` = 反向扫描到的 ST6 记录名（**行序最后**，不是字符串排序最大）。
    - 一般作品取 **1** 条（行序最后一条 ST6）；
+   - **th08 按路线各取最后一条**：`ST6A LS` / `ST6B LS5`；既有末行规则按路线独立应用。
    - **th16 取 4 条**：`ST6 SPRING_FINAL` / `ST6 SUMMER_FINAL` / `ST6 AUTUMN_FINAL` / `ST6 WINTER_FINAL` 均可作为全关终点。
 4. `startCheckpoint == first && endCheckpoint ∈ endCheckpoints` ⇒ 全关；否则丢弃。
 
@@ -127,7 +128,7 @@ fullRun(record) =
 | 时间筛选 | 近一周/一月/三月/全部（滚动窗口） | **月份**（按日志文件），默认当前月 |
 | 分组 | 按日 / 按机体 | **仅按日** |
 | 单条内容 | 时间、机体、起止 checkpoint、miss 数/明细 | 游戏、时间、全部 event（含类型） |
-| 游戏范围 | th14–th18 | th10–th18（logger 已接线且有 checkpoint 表） |
+| 游戏范围 | th14–th18 | th06–th08、th10–th18（logger 已接线且有 checkpoint 表） |
 | 统计 | 表头全关数 / 平均 miss | 顶部总记录数、平均 miss、通过率弹窗 |
 | 通过率 | 未实现 | 章节通过率 + 总通过率（按记录去重） |
 | 数据目录 | 硬编码 `%APPDATA%\thprac` | `LauncherGetDataDir()`，支持便携模式 |
@@ -171,3 +172,5 @@ fullRun(record) =
 | 2026-10-24 | 建档：实现 launcher「数据 → 全关」；只读所选月份 `logger_sessions_YYYYMM.jsonl`，按 CSV 首条/ST6 末条判定全关；顶部游戏（全部 + 当月有全关记录的作品）/月份筛选；按日倒序展示游戏、时间与全部 event；选中具体作品时显示总记录数、平均 miss（2 位小数）与通过率统计；弹窗按“出过该章节 event 的记录数 / 总记录数”计算各章节通过率并求乘积总通过率，均 2 位小数；新增 7 条 zh/en/jp locale。**Release\|x86 编译通过（0 error）；界面由用户核对。** |
 | 2026-10-24 | **th16 全关终点特例**：th16 的 ST6 末尾有 `SPRING_FINAL` / `SUMMER_FINAL` / `AUTUMN_FINAL` / `WINTER_FINAL` 四个最终关，现把行序最后 **4** 条 ST6 都视为有效终点（其余作品仍只取最后 1 条）。验收数字更新为 4 条全关（th14 1、th15 2、th16 1）；th16 的 `ST1 前半 #1 → ST6 AUTUMN_FINAL` 现应计入。**Release\|x86 编译通过（0 error）。** |
 | 2026-10-24 | **每条记录显示 event 数量量**：第一行在游戏/时间后追加 `event 数量: N`（新增 `THPRAC_DATA_FULL_RUN_EVENT_COUNT`，zh/en/jp），第二行仍显示全部 event。**Release\|x86 编译通过（0 error）。** |
+| 2026-10-27 | **登记 th06**：`kCheckpointSources` 增加 `{ "th06", TH06::kTh06CheckpointsCsv }`，游戏范围扩为 th06、th10–th18；th06 按通用规则判定全关（起点 = 首条 `ST1 前半 #1`，终点 = 行序最后一条 ST6 = `ST6 BOSS9`），其他作品逻辑不变。**`Release\|x86` 编译通过；界面未真机核对。** |
+| 2026-11-01 | 随 th07/th08 监控与日志实现登记共享 checkpoint 表，数据页范围扩为 th06–th08、th10–th18；th08 全关终点按 ST6A/ST6B 两条路线分别取末行，界面与新作日志均待真机。保留此前 th06 接入与真机记录。 |

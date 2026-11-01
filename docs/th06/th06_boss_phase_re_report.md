@@ -7,7 +7,7 @@
 > `sha256 = 9f76483c46256804792399296619c1274363c31cd8f1775fafb55106fb852245`（本机复核）。
 > **素材**（仓库外只读，不提交）：`../exes/ecl/th06/ecldata1..7.ecl`、`../exes/ecl_dump/th06/ecldata1..7.decl`。
 > **方法**：`pefile 2024.8.26` + `capstone 5.0.7` 只读反汇编；自写 Python ECL 解码器、L 难度分支符号执行器、阶段链模拟器；`thprac_th06.cpp` / `thprac_locale_def.cpp` 源码交叉核对。
-> **状态**：**🟡 单关实机通过（2026-10-27），全关回归未测**。本报告方案已按 §3.2 接入 `thprac_th06.cpp`（`TH06Logger`：道中按时间轴偏移区间、BOSS/MID 按 L 阶段 sub + 调用栈由内向外），日志接线与 IGI 显示同步落地；单关实机通过，全关/重放/四机体等回归待做。
+> **状态**：**✅ 真机通过（2026-11-01 用户确认此前测试已通过）**。本报告方案已按 §3.2 接入 `thprac_th06.cpp`（`TH06Logger`：道中按时间轴偏移区间、BOSS/MID 按 L 阶段 sub + 调用栈由内向外），日志接线与 IGI 显示同步落地；当前状态按用户确认为真机通过；历史验证记录保留，不额外推定逐项测试过程。
 > **地址口径**：正文以 **VA** 为主，必要时标注 **RVA = VA − 0x400000**。
 > **置信度图例**：✅ 反汇编/ECL 字节直接证实 ｜ 🟡A 反汇编 + ECL 字节 + 源码三证，未真机 ｜ 🟡B 仅落点/链级 ｜ ❌ 未定案。
 
@@ -625,7 +625,7 @@ struct { uint8_t stage; uint16_t sub; const char* name; } kTh06BossPhaseSubs[] =
 
 ## 7. 真机验证清单
 
-> 2026-10-27：**单关实机通过**（用户测试，监控 + 日志接线）；以下清单按优先级列出，**全关回归仍未做**。
+> 2026-11-01：用户确认此前已真机通过（监控 + 日志接线）。以下为原验证清单，保留供后续回归使用，不再作为“全关未测”的当前状态。
 
 - [ ] **基础读值**：BOSS 出现后 `*(u32*)0x5A5F60` 非空、`*(u8*)0x69BC50 == 1`、`E+0xE50 bit7 == 1`、`E+0xE51 bit3 == 1`。
 - [ ] **阶段 sub 命中**：L 难度、每关 1 次完整 BOSS 战，逐阶段打印 `GetBossPhaseSub()`，与 §4 表逐行比对。
@@ -777,3 +777,4 @@ struct { uint8_t stage; uint16_t sub; const char* name; } kTh06BossPhaseSubs[] =
 | 2026-10-27 | 建档。重新调查 th06 BOSS 阶段监控（L 专用）：定案「阶段 = BOSS 敌机的 ECL 阶段 sub」，给出三条引擎转移路径（HP 阈值 `0x411DA0`、时限 `0x411F40`、HP 归零 `0x412C50`）及首阶段 `op 0xA` 中断链；更正难度字节为 **run mask**（`0x4074EC`）；解释 `E+0x9D8` 为何不能直接当阶段号（`ins_35` call 会改 subId）并给出「调用栈最底层白名单」读取算法；给出 ST4 的 PLAYER_SHOT 分支（`0x40B2E7`）与 8 个变体 sub；产出 70 行 CSV → 75 个 L 有效 sub 的完整映射表（ST4 BOOKS 走时间轴 `0xCDD4`；ST7 的 Sub59/Sub67 不入表）；列出零 hook 主方案、四个 SetSub hook 备选、练习 warp 瞬态与罕见同帧双转移等 caveat，以及真机验证清单。**未编译、未运行、未改 CSV/源码；🟡 未真机。** |
 | 2026-10-27 | 与 `thprac_th06.cpp` 的 `THPatch()` 练习跳转做交叉验证（新增 §4.10）：按 patch 偏移落回 ECL sub/字段，70/70 section 的目标 sub 与 §4 完全一致；ST4 机体顺序、ST6 BOSS9 的 E/N/H/L 分派（同时独立印证 run mask 0x03/0x0C）、ST7 S9/S10 的 Sub59/Sub67 均得到源码级佐证。**修正 §3.2 读取方向**：thprac 会用 `ins_35` 从早期阶段直接 call 目标阶段，调用栈内可能出现两个白名单 sub，阶段提取改为「当前 sub → 栈顶 → 栈底」由内向外；同步更新 §0 第 7 条、§4.4 注、§5.3。**仍未真机。** |
 | 2026-10-27 | **监控落地 + 实机单关通过**：`TH06Logger` 已接入 `thprac_th06.cpp`（CSV 由 `docs/logger/tools/gen_th06_checkpoints.py` 生成 `thprac_th06_checkpoints_gen.cpp`；道中按 `tlInstr−pCode` 区间匹配 + 偏移单调，ST4 BOOKS 走同一路径；BOSS/MID 仅 L，按阶段 sub 白名单 75 条、调用栈由内向外；2 帧去抖；miss/bomb/interrupt 接 `GameSession`；IGI 增加「当前段落」）。`Release|x86` 编译通过；**用户实机单关通过**；全关/重放/四机体回归未测。 |
+| 2026-11-01 | 用户确认 th06 此前已真机通过，当前状态改✅；撤下“单关通过 / 全关回归未测”的当前限制，历史测试过程记录与回归清单保留，未新增或推定逐项测试数据。 |

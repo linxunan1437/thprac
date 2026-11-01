@@ -1,3 +1,7 @@
+"""Verify checkpoint warp values against source; not a Boss phase coverage check.
+
+2026-11-01: locate function ranges instead of brittle absolute source line numbers.
+"""
 import csv, re, sys
 from collections import Counter
 SRC = 'thprac/src/thprac/thprac_th07.cpp'
@@ -19,12 +23,15 @@ print(f'章节行 / boss 行: {len(chap)} / {len(boss)}  (期望 37 / 103)')
 print('逐关行数        :', dict(sorted(Counter(r[2] for r in data).items())))
 
 # ---- 从源码重算期望值（章节 = THStageWarp，boss = THPatch；dlg 取非 dlg；yuyuko() 取 0x9d7）
-src = open(SRC, encoding='utf-8').read().split('\n')
+source = open(SRC, encoding='utf-8-sig').read()
+warp_start = source.index('void THStageWarp(')
+patch_start = source.index('void THPatch(', warp_start)
+patch_end = source.index('void THSectionPatch(', patch_start)
+warp_lines = source[warp_start:patch_start].splitlines()
+patch_lines = source[patch_start:patch_end].splitlines()
 MCS = {1: (2, 1), 2: (1, 1), 3: (2, 1), 4: (4, 4), 5: (3, 1), 6: (2, 0), 7: (5, 3), 8: (5, 3)}
 want, stage, case = {}, None, None
-for i, l in enumerate(src, 1):
-    if i < 975 or i > 1834:
-        continue
+for l in warp_lines:
     m = re.search(r'if \(stage == (\d+)\)', l)
     if m:
         stage = int(m.group(1))
@@ -32,16 +39,14 @@ for i, l in enumerate(src, 1):
     if m:
         case = int(m.group(1))
     m = re.search(r'ECLTimeWarp\((\d+),\s*(0x[0-9a-fA-F]+|\d+)\)', l)
-    if not m or i > 1134:          # THPatch 段单独处理
+    if not m:                     # THPatch 段单独处理
         continue
     a, b = MCS[stage]
     nm = (f'ST{stage} #{case}' if b == 0 else
           f'ST{stage} 前半 #{case}' if case <= a else f'ST{stage} 后半 #{case-a}')
     want[nm] = [int(m.group(2), 0)]
 cur = None
-for i, l in enumerate(src, 1):
-    if i < 1134 or i > 1834:
-        continue
+for l in patch_lines:
     m = re.match(r'\s*case THPrac::TH07::(TH07_\w+):', l)
     if m:
         cur = m.group(1)
