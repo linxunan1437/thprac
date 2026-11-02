@@ -48,7 +48,7 @@
 | **sub 存在的证据（已接线）** | `ECLCallSub(ecl, offset, sub_id, …)` 写 opcode **`0x34`**（`0x00100034`）+ `sub_id`；`ECLSetTime(offset, time, sub_id)` 写 `0x00140086` + time + sub_id | `thprac_th08.cpp:1448-1468` |
 | 静态宿主对象 | `GameManager` `0x160F508` / `Supervisor` `0x17CE758`（由 `GAMEMODE_ADDR = 0x17CE8B0` 推得） | `docs/gametime/gametime_thxx_flags.md` §3 th08 |
 | 章节数表（前半/后半） | `mChapterSetup[10][2]` = `{{1,1},{4,0},{2,1},{4,2},{4,2},{3,2},{2,0},{2,0},{3,4},{0,0}//LW}` | `thprac_th08.cpp:799-810` |
-| miss / bomb / 一局开始 hook | `0x43BDD2`(enter_game，清计数) / `0x44CA94`+`0x44CA6A`(bomb / deadbomb，**空 hook**) / `0x44ABE9`(desolve) | `thprac_th08.cpp:3242/3269/3271/3273` |
+| miss / bomb / 一局开始 hook | `0x43BDD2`(enter_game，清计数) / `0x44CA94`+`0x44CA6A`(bomb / deadbomb，**空 hook**) / `0x44ABE9`(desolve，**LS 被弹，现同记 Miss**) | `thprac_th08.cpp:3242/3269/3271/3273` |
 | 符卡 id（用于捕获判定） | `*(i32*)0x4EA678` | `thprac_th08.cpp:3263` |
 | IGI 面板类 | `TH08InGameInfo`（`mMissCount`/`mBombCount`/`mSCCount`/`mLSCCount`/`mDesolveCount`） | `thprac_th08.cpp:984` |
 | 既有三态已验证字段（非 ECL） | gamemode `0x17CE8B0`、pause `0x164D0BA`、replay `(0x164D0B4 & 8)` | `docs/gametime/gametime_thxx_flags.md` §3 th08 |
@@ -197,3 +197,4 @@
 | --- | --- |
 | 2026-10-16 | 建档（requests）。为 A 代建档：汇总 thprac 侧全部已知锚点（Timeline 结构 `0xF54CF0` / ECL Buffer `0x4ECCB8` / STD / `ECLCallSub` sub 证据 / 静态宿主对象 / 章节数表）；把 Q1 改为「sub 索引 / 时间值 / 指令偏移」三选一；登记素材缺口（无 `.ecl`、A 代无 eclmap）。**未跑逆向**。 |
 | 2026-10-19 | **E1 收口：§2–§9 各 Q 由「待答」改为「已答 + 结论摘要」，结论落盘到新建的 `docs/th08/th08_ecl_re_report.md`。** 要点：**Q1** 三者并存（`(c)` 为主）——`cur_ins=*(u32*)(host+0x7F8)`、`cur_time=*(i32*)(host+0x804)`、`cur_sub=*(i16*)(host+0xA1C)`；Timeline（`0xF54CF0`，slot `+8`=time / `+0xC`=ins）是**另一套机制**。**Q2** sub 表 `*(u32*)(0x4ECCB8+4)`（=pECL+0x48）、无名字；`call`=opcode 0x34→`0x421BD0`；Timeline 走 17 项表 `0x42AD60`。**Q3** 调用栈：基址 `host+0xA20`、帧长 `0x228`、深度 `*(i16*)(host+0x2CEA)`≤16。**Q4** A 代无「具名 main 宿主」；资源为静态单例 `0x4ECCB8`、宿主为静态 manager `0x577F20` 内嵌数组（`0x57D2F0`、步长 `0x53D0`、480 槽）；捕获点 `0x418450` / `0x4184C8`；**「主线是哪一槽」未定案（🟡）**。**Q5** 主解释器 `FUN_004184B0`（`0x4184B0`–`0x41ECBD`）、跳表 `0x41ECBE`；`0x42F34D` **与当前位置无关**（thprac 注释误读）、`0x437AF3` 非每帧。**Q6** **运行期无 sub 名** ⇒ 只能用 thprac 的 `ECLWarp` 表离线映射。**Q7** 地址有效（含新登记 `0x160F53C`=rankMask）；「4 组合×2 队」第二维 🟡。**Q8** 两类 warp 的生效尺度不同。**Q9** 沿用 latch；**入口列记 `(time, offset)`、主键取 `offset`**。附录 A 抽出 `THStageWarp`/`THPatch` 全量候选 `(time, offset)`。**补记**：「当前位置」的权威写法 = 先 `cursor = *(u32*)(host+0x2CA0)`（通常 = `host+0x7F8`），再读 `*(u32*)(cursor)`/`+0xC`/`+0x224`；`host+0x3384` 是**子上下文对象指针数组**（cursor@+8、栈@+0x230），单宿主内可并行多个 cursor（🟡）。**未真机（🟡）**。 |
+| 2026-11-02 | §1 的 desolve 条目补注：`0x44ABE9` 即 LS 被弹，IGI miss 行括号内 `mDesolveCount` 同源；日志现于同一钩子补记 `Miss`（LS 不走正常 `0x44CD29` 生命损失路径，无重复）。 |

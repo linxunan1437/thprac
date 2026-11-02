@@ -15,7 +15,7 @@
 | 难度/路线 | 9个实际 ECL 文件索引独立路由，普通Boss diff3(L)、Extra diff4；E/N/H只监控道中 |
 | 排除 | Native spell practice（flags bit14）整体排除，避免 `*sp` 文件误用正常 sub 表；其中含17 LW，原空值不变 |
 | latch | 2个有效采样帧稳定后置值；未命中no-op；初始化/换关/退出清main |
-| 日志 | `GameSession("th08")`，启动/结束checkpoint、miss/bomb/interrupt、机体；复用共享JSONL与练习合并 |
+| 日志 | `GameSession("th08")`，启动/结束checkpoint、miss/bomb/interrupt、机体；desolve（LS 被弹）也记 miss；复用共享JSONL与练习合并 |
 | 新局/重开 | 既有43BDD2初始化钩子明确Begin；正常局内文件索引前进保留同一局；同文件重开Begin |
 | 通关 | 独立完成分发钩子置stageClear，覆盖练习与最终关；gamemode3本身不作为通关证据 |
 | IGI | 既有miss/bomb面板新增Section行，跟随原IGI开关显示 |
@@ -64,6 +64,7 @@ Boss槽 `0xF54CC0 / 0xB54CC0` 和 `+4`；先1后0以覆盖ST6A LS交接。宿主
 | `0x44CA83 / 0x4CA83` | `8B 0D AC CF 64 01`，6B | 所有成功deathbomb共同汇合点，读取计数前记一次 |
 | `0x44CD29 / 0x4CD29` | `E8 32 15 00 00`，5B | 唯一call0x44E260，在游戏给miss计数加1前记Miss |
 | `0x439C1F / 0x39C1F` | `C7 05 40 F5 60 01 01 00 00 00`，10B | 完成状态分发，置stageClear，位于练习/正常/最终关分支之前 |
+| `0x44ABE9 / 0x4ABE9` | `8B 55 F8`，3B | 既有desolve钩子（LS 被弹）：`mDesolveCount++` 后记一次 Miss；LS 不会走 `0x44CD29` 正常生命损失路径，故无重复 |
 
 Miss计数证明：被调函数 `0x44E2B0 / 0x4E2B0` 读 `GM+0x3DA9C`，+1后写回；GM=`0x160F508 / 0x120F508`，故地址=`0x164CFA4 / 0x124CFA4`，与IGI同源。不是碰撞进入决死窗口就算miss，成功deathbomb不会调用该生命损失路径。
 
@@ -71,7 +72,7 @@ Deathbomb覆盖证明：已有 `0x44CA6A / 0x4CA6A` 只覆盖资源≥2的一条
 
 通关证明：`0x439BFE / 0x39BFE` 取flags第5–6位，`0x439C01 / 0x39C01` 要求值2，随后 `0x439C13 / 0x39C13` OR0x60提交为3，进入完成记录/换关/结束分发。新增钩子在该一次性分发内，早于 `0x439D29 / 0x39D29` 的练习分支和最终关判断。不能直接把gamemode3或Boss槽消失当通关。stageClear仅新局/换关/退出复位，不因同帧latch覆盖掉。
 
-既有desolve钩子 `0x44ABE9 / 0x4ABE9` 保持原行为，没有当成真正Miss。未新增spellFlag计数器，卡结束后立即退出仍可能记interrupt，沿用th06阶段日志基线而非th14–18扩展口径；待真机后评估。
+既有desolve钩子 `0x44ABE9 / 0x4ABE9` 就是 LS 被弹（IGI miss 行括号内的 `mDesolveCount`）：现在先 `mDesolveCount++`、再 `TH08Logger::OnMiss()`。**LS 阶段按游戏设计不会进入 `0x44CD29` 的正常生命损失路径，故不会与普通 miss 重复**；native spell practice/LW 仍由 `OnMiss()` 的 bit14 guard 整体排除。未新增spellFlag计数器，卡结束后立即退出仍可能记interrupt，沿用th06阶段日志基线而非th14–18扩展口径；待真机后评估。
 
 ## 4. 检查与待测
 
@@ -84,7 +85,7 @@ Deathbomb覆盖证明：已有 `0x44CA6A / 0x4CA6A` 只覆盖资源≥2的一条
 
 已通过104个候选sub的decl/原始指令数量、关键opcode和数值参数、难度run mask复算；9包装别名直接call断言；生成物字节一致性；5处钩子指纹、原字节与整指令长度；miss唯一调用、deathbomb汇合/互斥和文件名索引验证；新增C++范围按根.clang-format格式化，git diff --check通过。
 
-尚未真机：L各关道中/MID/关底、4A/B与6A/B切换、Extra全阶段、正常/死亡bomb、同关fast retry及跨关局不拆分、ST6A槽1 LS、ST6B五张LS及条件不满足、最终关/练习通关与中退、native spellpractice/LW不误标。2帧去抖和包装sub的实际采样窗口仍需实测，代码接入不提升候选映射的验证等级。
+尚未真机：L各关道中/MID/关底、4A/B与6A/B切换、Extra全阶段、正常/死亡bomb、同关fast retry及跨关局不拆分、ST6A槽1 LS、ST6B五张LS及条件不满足、最终关/练习通关与中退、native spellpractice/LW不误标；**LS 被弹 → IGI 括号计数与 JSONL `miss` 条数一致、checkpoint 为 LS 记录名**。2帧去抖和包装sub的实际采样窗口仍需实测，代码接入不提升候选映射的验证等级。
 
 ## 变更记录
 
@@ -93,3 +94,4 @@ Deathbomb覆盖证明：已有 `0x44CA6A / 0x4CA6A` 只覆盖资源≥2的一条
 | 2026-11-01 | 参照th06实现TH08Logger、37章节+104非LW阶段/9包装别名、IGI与GameSession；独立补证真正miss、完整deathbomb汇合和通关分发钩子，新增生成/验证工具；Release|x86 编译与链接通过；未真机。 |
 | 2026-11-01 | 主代理集成检查：Release\|x86 编译/链接与Win7兼容构建检查通过，产物 `Release/thprac.exe`；MSVC PDB辅助进程在沙箱内报LNK1101，在已授权沙箱外VS开发环境构建成功。仅既有C4715/LNK4099警告；对应生成物/映射静态检查通过，未运行游戏，E6仍未测。 |
 | 2026-11-01 | 对照th07中Boss结束MID2滞留问题：th08仅章节latch时更新floor，Boss期间不消费入口，未发现同类缺陷；9文件路线生产C++交接回归及错误floor负对照通过。保留原实现，新增验证脚本，E6仍未测，见§2.1。 |
+| 2026-11-02 | **LS 被弹补记 `miss`**：既有 `th08_desolve` 钩子（`0x44ABE9`，`8B 55 F8`，3B，`mDesolveCount` 同源）内追加 `TH08Logger::OnMiss()`；LS 不会走 `0x44CD29` 正常 miss 路径，无重复；native practice/LW 仍由 bit14 guard 排除。**Release\|x86 编译/链接通过（2026-11-02）；真机待验证（🟡）。** |

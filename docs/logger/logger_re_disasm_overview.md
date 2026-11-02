@@ -19,7 +19,7 @@
 | IGI 显示（miss/bomb 计数下一行） | ✅ | |
 | 读白名单 CSV 的“记录名”列 | 不消费（仅用“段落入口函数/游戏/关卡”做匹配） | ✅ |
 | 每次启动/退出的 JSON 日志 | ✅ 已接线（th06–th08、th10–th18；th06真机通过，其余状态见进度表） | |
-| miss/bomb 事件列表、checkpoint 统计 | ✅ 已接线（th10–th18 九作，**未真机**）；**th17 另含 `break`（撞咆哮）**、**九作均另含 `interrupt`（未通关就退出游戏，口径 12；九作均有 `spellFlag` 抑制，口径 15）** | |
+| miss/bomb 事件列表、checkpoint 统计 | ✅ 已接线（th10–th18 九作，**未真机**）；**`break`：th17 撞咆哮、th07 撞结界**；**九作均另含 `interrupt`（未通关就退出游戏，口径 12；九作均有 `spellFlag` 抑制，口径 15）** | |
 
 > **最终目的**：实时显示**当前段落**。CSV 里每个 checkpoint 都**指向一个段落的开头**；“读取当前 ECL 函数(sub)”只是判定“现在到了哪个段落”的手段。日志迭代里的“启动/最后/经过的 checkpoint”全部是**段落级**。
 
@@ -198,7 +198,7 @@ if (section) cache = section;                               // 命中 → 置值
 
 ### 5.3 boss 段（方案二）逐作锚点
 
-> **A代实现收口（2026-11-01）**：旧Boss分析撤稿后已独立重查并实现。th07：Boss槽/subId/调用栈 + ST4最内层控制sub与活跃姐妹组合，103条sub规则覆盖102个Boss记录，另CHAOS走时间轴；普通Boss仅L、Extra/Ph独立难度。th08：槽0/1、主cursor与提交深度`H+0x2CE8`、104阶段/9包装别名；解释器工作深度`H+0x2CEA`不得与帧末主cursor混配；普通Boss仅L、Extra支持、原生符卡练习含LW排除。两作生成物、IGI与日志已接线；th07已进入E6（ST1/ST2自然流程MID2交接修复回归通过），th08未测，静态映射接入不等于真机定案。实现报告：`docs/th07/th07_monitor_impl_report.md`、`docs/th08/th08_monitor_impl_report.md`。
+> **A代实现收口（2026-11-01）**：旧Boss分析撤稿后已独立重查并实现。th07：Boss槽/subId/调用栈 + ST4最内层控制sub与活跃姐妹组合，103条sub规则覆盖102个Boss记录，另CHAOS走时间轴；普通Boss仅L、Extra/Ph独立难度。th08：槽0/1、主cursor与提交深度`H+0x2CE8`、104阶段/9包装别名；解释器工作深度`H+0x2CEA`不得与帧末主cursor混配；普通Boss仅L、Extra支持、原生符卡练习含LW排除；LS被弹(desolve)记miss。两作生成物、IGI与日志已接线；th07已进入E6（ST1/ST2自然流程MID2交接修复回归通过），th08未测，静态映射接入不等于真机定案。实现报告：`docs/th07/th07_monitor_impl_report.md`、`docs/th08/th08_monitor_impl_report.md`。
 
 > **方案二**（与道中同机制）：读 **boss 宿主**里 ECL 引擎的**当前 sub 名** → 白名单 latch。boss ECL 跑在 **boss 敌人自己的宿主**里、**不在主线宿主**，故须**先取 boss 宿主**。逐作报告：`docs/th14/th14_boss_phase_report.md`、`docs/th15/th15_boss_phase_report.md`、`docs/th16/th16_boss_phase_report.md`、`docs/th17/th17_boss_phase_report.md`、`docs/th18/th18_boss_phase_report.md`。
 > 统一读取链（th15–18）：`thread=*(host+0xC)` → `subIdx=*(thread+4)` → `res=*(host+0x11F8)` → `table=*(res+0x8C)` → `name=*(char**)(table+subIdx*8)`；**th14 无 sub 索引**（`node+4`=绝对 ip，需 ip→sub 区间映射）。
@@ -328,3 +328,5 @@ if (section) cache = section;                               // 命中 → 置值
 | 2026-11-01 | th07 MID2交接修复测试版 `Release/thprac_th07_handoff.exe` 已完成Release x86编译/链接及Win7兼容检查，静态回归通过，等待实机复测。默认输出无法写入，测试版另存。 |
 | 2026-11-01 | 核查th08中Boss→后半章节交接：Boss期间不推进floor，退场取最新未latch入口，无th07同类每帧消费缺陷；9路线生产C++回归/错误floor负对照通过。§5.1同步，运行期代码未改、E6仍未测。 |
 | 2026-11-01 | 用户确认本次中Boss→后半章节交接回归通过，th07当前注记同步；仅收口本次修复，未将全部E6或日志验证标为完成。 |
+| 2026-11-02 | **th07 日志新增 `break`（撞结界）**：复用既有 `th07_border_break` EHOOK（`0x441DA4 / 0x41DA4`，5B，与 IGI `THPRAC_INGAMEINFO_07_BORDER_COUNT` 同源），在同一 lambda 内追加 `TH07Logger::OnBreak()`；共享枚举/序列化无改动。§0 事件表同步为「`break`：th17 撞咆哮、th07 撞结界」。**接线完成，Release\|x86 编译/链接通过（2026-11-02）；真机待验证（🟡）。** |
+| 2026-11-02 | **th08 LS 被弹补记 `miss`**：既有 `th08_desolve` EHOOK（`0x44ABE9 / 0x4ABE9`，3B，与 IGI miss 行括号内 `mDesolveCount` 同源）lambda 内追加 `TH08Logger::OnMiss()`；LS 不走 `0x44CD29` 正常 miss 路径，无重复；native practice/LW 仍由 bit14 guard 排除。§5 收口注记同步。**Release\|x86 编译/链接通过（2026-11-02）；真机待验证（🟡）。** |

@@ -90,7 +90,7 @@ thprac 的 `EHOOK` 是 **INT3 + VEH 同步回调**，跑在触发指令的游戏
 | `checkpointCount` | int | latch 次数（含启动 checkpoint，即首次 latch 记 1）。等价读法：`checkpointCount - 1` = 启动之后又经过了几段。**合并行（`total > 1`）固定为 1**（口径 14） |
 | `total` | int | **仅在「单章节」行出现**（`total > 0`）；本行合并进来的尝试次数（口径 11） |
 | `got` | int | 与 `total` **成对出现**（判据挂在 `total` 上，`got` 不单独判零）；其中**无 `miss`/`bomb`/`break`** 的次数 —— **`interrupt` 不影响 `got`**（口径 13） |
-| `events` | array | `{type, checkpoint}`；`type ∈ {"miss","bomb","break","interrupt"}`（**`break` 仅 th17 产出**，= 撞咆哮；`interrupt` = 未通关就退出游戏，口径 12，**五作都产出**）；`checkpoint` = 事件发生时 IGI 面板显示的段落（未 latch 前为 `"main"`）。**合并行（`total > 1`）固定为 `[]`**（口径 14，键保留） |
+| `events` | array | `{type, checkpoint}`；`type ∈ {"miss","bomb","break","interrupt"}`（**`break` 由 th17（撞咆哮）/ th07（撞结界）产出**；`interrupt` = 未通关就退出游戏，口径 12，**五作都产出**）；`checkpoint` = 事件发生时 IGI 面板显示的段落（未 latch 前为 `"main"`）。**合并行（`total > 1`）固定为 `[]`**（口径 14，键保留） |
 | `eventsDropped` | int | **仅在 >0 时出现**；`events` 溢出 256 后被丢弃的条数。**合并行固定不出现**（口径 14 一并归零） |
 
 固定字段顺序（writer 决定）：`game, start, shot, startCheckpoint, endCheckpoint, checkpointCount[, total, got], events[, eventsDropped]`。读取端按 key 取值，不依赖顺序（吸取 `ParseGameSessionLine` 里 `durationNs` 用 `strstr` 定位的教训，`thprac_launcher_others.cpp:171-173`）。
@@ -178,7 +178,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 
 ## 4. 逐作接线
 
-每作 **8 处**改动（逐字同构，只差文件号、`PLAYER_PTR` 值与机体表达式）；**th17 另有第 9 处**（撞咆哮 → `OnBreak()`，见下表末行）：
+每作 **8 处**改动（逐字同构，只差文件号、`PLAYER_PTR` 值与机体表达式）；**th17 / th07 另有第 9 处**（th17 撞咆哮 / th07 撞结界 → `OnBreak()`，见下表末行）：
 
 | # | 位置 | 改动 |
 | --- | --- | --- |
@@ -190,7 +190,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | 6 | `THxxLogger::Update()` 体末 | `mSession.Latch(GameLogRecordOfSection(mSection));` |
 | 7 | `thxx_bomb_dec` EHOOK 的**既有 lambda 体内** | `THxxLogger::singleton().OnBomb();` |
 | 8 | `thxx_life_dec` EHOOK 的**既有 lambda 体内** | `THxxLogger::singleton().OnMiss();` |
-| 9 | `th17_roar_break` EHOOK 的**既有 lambda 体内**（`thprac_th17.cpp:3063`） | `TH17Logger::singleton().OnBreak();`（**仅 th17**；事件 `break` = 撞咆哮） |
+| 9 | `th17_roar_break` / `th07_border_break` EHOOK 的**既有 lambda 体内**（`thprac_th17.cpp:3196` / `thprac_th07.cpp:2552`） | `THxxLogger::singleton().OnBreak();`（th17 = 撞咆哮、th07 = 撞结界；事件 `break`；**同址不新增 EHOOK**） |
 
 ### 4.1 逐作差异
 
@@ -199,8 +199,10 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | th14 | `TH14Logger` | `0x4DB67C` | `S(IGI_PL_14[static_cast<byte>((*(i32*)0x4f5828))*2 + (*(i32*)0x4f582c)])` | `th14_bomb_dec` `0x41218A` | 采样机制是「指令指针 → sub 名」（`BuildIpMap`/`NameOfIp`），与其余四作不同；`OnStageStart()` 另有 `mIpMapCount/mIpMapTable` 复位 |
 | th15 | `TH15Logger` | `0x4E9BB8` | `S(IGI_PL_15[static_cast<byte>(*(i32*)0x4E7404)])` | `th15_bomb_dec` `0x41497A` | mid-boss 收尾状态是 `mMidBossDoneRecord`（记录名）而非 bool |
 | th16 | `TH16Logger` | `0x4A6EF8` | `std::format("{}{}", S(IGI_PL_16[*(i32*)0x4A57A4]), S(IGI_PL_16S[*(i32*)0x4A57AC]))` | `th16_bomb_dec` `0x40DB9C` | **唯一双数组拼接**（机体 + 子机），需 `std::format` 临时对象；`Tick` 在同一全表达式内复制完，无悬垂 |
-| th17 | `TH17Logger` | `0x4B77D0` | `S(IGI_PL_17[(*(i32*)0x4B59F4))*3 + (*(i32*)0x4B59F8)])` | `th17_bomb_dec` `0x411CAB` | **唯一有第 9 处**：`th17_roar_break` `0x40F880`(10B) 既有 lambda 内 → `OnBreak()`（撞咆哮；同址不新增 EHOOK） |
+| th17 | `TH17Logger` | `0x4B77D0` | `S(IGI_PL_17[(*(i32*)0x4B59F4))*3 + (*(i32*)0x4B59F8)])` | `th17_bomb_dec` `0x411CAB` | **有第 9 处**：`th17_roar_break` `0x40F880`(10B) 既有 lambda 内 → `OnBreak()`（撞咆哮；同址不新增 EHOOK）；th07 的撞结界同样走第 9 处（A 代，见 §4 第 9 项） |
 | th18 | `TH18Logger` | `0x4CF410` | **无**（传 `nullptr`） | `th18_bomb_dec` `0x4574D3` + `th18_cylinder` `0x410F22` | IGI 无 `diff_pl` 行、机体地址未登记；**bomb 有两个递增点，两处都挂了 `OnBomb()`**，否则 JSON 条数会少于 IGI 面板 |
+
+> **A 代补充（th08）**：LS 阶段被弹不走 `0x44CD29` 正常 miss 路径，走既有 `th08_desolve` 钩子（`0x44ABE9`，与 IGI miss 行括号内 `mDesolveCount` 同源）；同一 lambda 内 `mDesolveCount++` 后追加 `TH08Logger::OnMiss()`，事件类型仍为 `miss`。native spell practice/LW 由 `OnMiss()` 的 bit14 guard 排除。
 
 ### 4.2 两个必须遵守的接线约束
 
@@ -214,7 +216,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | `OnStageStart()`（`*_game_start` 钩子内） | INT3 + VEH 同步回调，游戏线程 | 是 | **否** | 否 |
 | `Update()` 顶部（`Tick`） | 同一个每帧派发 EHOOK 的 VEH 回调 | 是 | 可以（同处已在做 ImGui / `std::format`；先例：`th16_rep_save` 在 VEH 里调 `THSaveReplay` → `ReplaySaveParam` → `CreateFileW`） | **可以**（一局一次） |
 | `Update()` 末尾（`Latch`） | 同上 | 是 | 不需要（纯指针比较 + `strcmp`） | 否 |
-| `OnMiss()` / `OnBomb()` / `OnBreak()`（`*_life_dec` / `*_bomb_dec` / `th17_roar_break` 钩子内） | INT3 + VEH 回调，事件触发即进 | 是 | **禁止** | **禁止** |
+| `OnMiss()` / `OnBomb()` / `OnBreak()`（`*_life_dec` / `*_bomb_dec` / `th17_roar_break` / `th07_border_break` 钩子内） | INT3 + VEH 回调，事件触发即进 | 是 | **禁止** | **禁止** |
 | `Update()` 顶部的 `IsGameExitEdge()` + `PushEvent(Interrupt, …)`（五作） | 同一个每帧派发 EHOOK 的 VEH 回调，且早于 `Tick()` | 是 | **禁止**（只做指针比较 + POD 拷贝） | **禁止** |
 
 ### 4.4 stageClear / interrupt 接线（口径 12，**th14–th18 五作**）
@@ -378,7 +380,7 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 4. 正常退出游戏：最后一局已落盘。
 5. th14 / th15 / th17 / th18 各跑一次最小流程（启动 → 打一段 → 退出）：五作行都写进同一文件、`game` 字段正确。
 6. 对照 IGI 面板的 miss/bomb 计数与 `events` 条数（**重点 th18 的 cylinder**）。
-7. **th17 的 `break`（撞咆哮）**：练习启动一局 → 触发 ≥2 次撞咆哮 + ≥1 miss + ≥1 bomb → 回菜单：`"type":"break"` 条数 == IGI 面板「撞咆哮」计数（`THPRAC_INGAMEINFO_17_ROAR_BREAK_COUNT`）；每条 break 的 `checkpoint` 与触发时刻 IGI「当前段落」一致（允许 §8 #4 的一帧延迟）。顺带确认该局无 `eventsDropped`（撞咆哮与 miss/bomb 共用 256 上限，见 `knownBugs.md` #3）。
+7. **th17 的 `break`（撞咆哮）**：练习启动一局 → 触发 ≥2 次撞咆哮 + ≥1 miss + ≥1 bomb → 回菜单：`"type":"break"` 条数 == IGI 面板「撞咆哮」计数（`THPRAC_INGAMEINFO_17_ROAR_BREAK_COUNT`）；每条 break 的 `checkpoint` 与触发时刻 IGI「当前段落」一致（允许 §8 #4 的一帧延迟）。顺带确认该局无 `eventsDropped`（撞咆哮与 miss/bomb 共用 256 上限，见 `knownBugs.md` #3）。**th07 的 `break`（撞结界）**：触发结界后撞弹 ≥2 次 → `"type":"break"` 条数 == IGI「撞结界」计数（`THPRAC_INGAMEINFO_07_BORDER_COUNT`），checkpoint 同「当前段落」（同源 `th07_border_break` `0x441DA4`）。
 8. **单章节合并（口径 11 / 13 / 14）**：练习 warp 到单个 section，连续重开 5 次（其中 3 次无 miss/bomb）→ 月度文件里**只有 1 行**，`total == 5`、`got == 3`（`interrupt` 不影响 `got`），且这 5 次之间**没有被追加新行**。注意：① 每次尝试都可能带一条 `interrupt`（口径 12；但口径 15 的 `spellFlag` 会抑制它），判据靠的是 `cpCount==1 && 不是「只有interrupt」`（口径 16：**零事件也算**）或 `cpCount==2 && 含interrupt`；② 合并行**规范化为 `checkpointCount == 1` 且 `"events":[]`**（口径 14）；③ 重开 1 次（`total == 1`）时**不**规范化，仍带真实的 `checkpointCount` 与 `events`。
 9. **合并的边界**：接上一条，换一个 section 再练 → **新起一行**；打一次全关（非单章节）→ 追加新行且**不带** `total`/`got`；把系统日期改到次日再练同一 section → 新起一行。
 10. **就地改写不破坏文件**：验证期间用 `tail` 确认文件**没有残留半行**（旧行更长时被 `SetEndOfFile` 截断干净），且此前已写入的行**一个字节都没变**。
@@ -457,3 +459,5 @@ SetEndOfFile(hFile);                                     // 新行更短时截�
 | 2026-11-01 | th07/th08的Release\|x86编译/链接通过，生成物与事件静态验证通过；原共享GameSession实现未改，两作E6未测。 |
 
 | 2026-11-01 | 用户确认本次中Boss→后半章节交接修复回归通过，同步th07当前状态；不扩写为整局日志与全部E6通过。 |
+| 2026-11-02 | **th07 新增 `break` 事件（撞结界）**：共享枚举/序列化已有 `Break`，零改动；`TH07Logger::OnBreak()` 只做 `PushEvent(GameLogEventType::Break, GameLogRecordOfSection(mSection))`，在既有 `th07_border_break` EHOOK（`0x441DA4`，5B，`thprac_th07.cpp:2552`）lambda 内追加调用，与 IGI `THPRAC_INGAMEINFO_07_BORDER_COUNT` 同源。`break` 为非 `interrupt` 的尝试级事件（计入 `got`/miss）。**接线完成，Release\|x86 编译/链接通过（2026-11-02）；真机待验证（🟡）。** |
+| 2026-11-02 | **th08 LS 被弹补记 `miss`**：既有 `th08_desolve` EHOOK（`0x44ABE9`，3B）lambda 内追加 `TH08Logger::OnMiss()`，事件类型仍为 `miss`；该钩子与 IGI miss 行括号内 `mDesolveCount` 同源。LS 不会走 `0x44CD29` 正常生命损失路径，无重复；native practice/LW 仍由 bit14 guard 排除。**Release\|x86 编译/链接通过（2026-11-02）；真机待验证（🟡）。** |

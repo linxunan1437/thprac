@@ -631,6 +631,11 @@ namespace TH07 {
             mStartMiss = globals ? static_cast<int>(globals->miss_count) : 0;
             mStartBomb = globals ? static_cast<int>(globals->bombs_used) : 0;
         }
+        void OnBreak()
+        {
+            // No allocation: this runs inside a VEH hook callback.
+            mSession.PushEvent(GameLogEventType::Break, GameLogRecordOfSection(mSection));
+        }
         const char* CurrentSection() const { return mSection; }
         void Update();
 
@@ -2551,6 +2556,7 @@ namespace TH07 {
     })
     EHOOK_DY(th07_border_break, 0x441DA4,5,{
         TH07InGameInfo::singleton().mBorderBreakCount++;
+        TH07Logger::singleton().OnBreak();
     })
     EHOOK_DY(th07_lock_timer1, 0x42D17E,3,{ // initialize
         g_lock_timer = 0;

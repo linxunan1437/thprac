@@ -46,7 +46,7 @@ missPoints(row) = 去重(events[].checkpoint，排除 type == "interrupt")
 ```
 
 - **`interrupt` 不计入 miss**：练习段打完退出几乎必带 interrupt；照 hmaker 旧口径会把 NN 率打成 0。
-- **`break` 计入 miss**（th17 撞咆哮）。
+- **`break` 计入 miss**（th17 撞咆哮 / th07 撞结界）。
 - **合并行必须按 `total`/`got` 展开**：否则 th17 `ST6 BOSS10` 的 32 次练习会被当成 12 条且全部 NN。
 - `total == 1` 的首条记录不规范化，保留真实 `events`；`total > 1` 的合并行可能 `events=[]`，也可能残留首条事件，统计以 `total`/`got` 为准。
 
@@ -185,3 +185,4 @@ NN数       = clean
 | 2026-10-24 | 记录结构/解析器抽成共享的 `SessionRecord` / `SessionEvent` / `ParseSessionRecord`，供「单卡」页复用；单过程读取逻辑不变（仍取最近 3 个月文件），新增 `LoadMonthSessionRecords()` 给单卡页按所选月份读取。**无行为变化。** |
 | 2026-10-27 | **登记 th06**：`kCheckpointSources` 增加 `{ "th06", TH06::kTh06CheckpointsCsv }`（`thprac_launcher_data.cpp`），游戏范围扩为 th06、th10–th18。th06 的 109 条记录名与章节/boss 一并可选（起点/终点下拉、配置校验均复用同一份 CSV）。**`Release\|x86` 编译通过；界面未真机核对。** |
 | 2026-11-01 | 随 th07/th08 监控与日志实现登记共享 checkpoint 表，数据页范围扩为 th06–th08、th10–th18；th08 全关终点按 ST6A/ST6B 两条路线分别取末行，界面与新作日志均待真机。保留此前 th06 接入与真机记录。 |
+| 2026-11-02 | `break` 计入 miss 的说明补 th07 来源（撞结界）；统计代码无改动（非 `interrupt` 即尝试事件/失败）。 |

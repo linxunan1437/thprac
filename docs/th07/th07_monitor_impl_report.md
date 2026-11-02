@@ -16,7 +16,7 @@
 | 普通关范围 | ST1–6 Boss仅L；ST4路线取真实控制宿主与三姐妹当前执行栈，不读thFakeShot/机体猜路线 |
 | Extra / Ph | ST7 difficulty4、ST8 difficulty5；MID与NS/S字典均登记，不按CSV顺序计阶段 |
 | 显示 | IGI miss/bomb区下新增“当前段落”；Logger每帧独立更新，不依赖IGI是否打开 |
-| 日志 | GameSession Begin/Tick/Latch、miss/bomb、interrupt；复用共享月JSONL与单章节合并 |
+| 日志 | GameSession Begin/Tick/Latch、miss/bomb/break、interrupt；复用共享月JSONL与单章节合并 |
 | 重开与换关 | 既有stage-init钩子通知；同关/练习新局Begin，正常向后换关保留Session，仅清当前段落/基线 |
 | 验证 | 原始ECL sub边界、63条独立helper/原字节目标断言、12路线中断表检查、CSV集合与生成物roundtrip通过；真机待测 |
 
@@ -86,6 +86,8 @@ Controller slot0的Sub44发中断2，45发3，46发8，47按累计伤害选主�
 
 miss/bomb读取与IGI同源：globals指针 **0x626278 / 0x226278**，miss_count=+0x50、bombs_used=+0x6C；stage-init捕获基线，后续只记正增量。计数下降建立新基线，异常大跳不伪造事件；暂停不增长自然无事件。机体取 **0x62F645 / 0x22F645** 与 **0x62F646 / 0x22F646** 拼IGI_PL_07下标。
 
+撞结界（`break`）同样与IGI同源：既有`th07_border_break` EHOOK（**0x441DA4 / 0x41DA4**，5B）原先只递增`mBorderBreakCount`；该处指令为`mov [0x62F890], eax`（`cherry_plus = globals->cherry_base`），位于结界结束例程**0x441BD0 / 0x41BD0**内，由撞弹（player state `[+0x2408]==4`，调用点`0x43E366` / `0x43EB4E`）、bomb输入（`0x440A26`）及带结界死亡等路径共用。现于同一lambda内追加`TH07Logger::OnBreak()`，一条`break`事件与IGI「撞结界」计数一一对应；不新增hook、不在VEH回调内分配堆。事件checkpoint取当时`mSection`（与miss/bomb同口径，可能滞后一帧）。
+
 退出前先入interrupt，再Tick结束/落盘；最终记录已latch且Boss槽从有到无时将stageClear置位。该收尾判据、窗口2帧、正常跨关不拆日志、最后一符自然结束/练习提前退出、极短阶段与同帧miss等均需真机回归。**没有宣称采用th14–18的spellFlag语义；本轮使用th06式stageClear兜底，符卡完成后提前退出的细粒度interrupt抑制待专项验证。**
 
 ## 5.1 真机反馈：ST1/ST2 中 Boss 结束后停留 MID2（2026-11-01）
@@ -109,7 +111,7 @@ miss/bomb读取与IGI同源：globals指针 **0x626278 / 0x226278**，miss_count
 
 静态检查：103条规则唯一、102个Boss记录与CSV求差为空（仅CHAOS按时间轴）；63条helper/原字节目标断言；12route标记核指定body中断表；8/8 ECL sub起点/decl索引；生成物两CSV逐字一致且重复生成不变。`verify_th07_route.py` 直接抽取生产C++的ActiveSister和controller选择代码，以独立小程序验证12个嵌套控制器、支援root遮蔽旧active、符卡body祖先等回归，全部通过。Release|x86编译/链接通过（主代理执行），未真机。
 
-待真机：L自然各关与所有练习Boss入口；ST4三姐妹分别走12路线记录；Ex/Ph自然与符前warp；同关重开、正常跨关、菜单退出、回放；miss/bomb与JSONL起终点/计数、关闭IGI后的独立采样；长记录名在IGI中的宽度。
+待真机：L自然各关与所有练习Boss入口；ST4三姐妹分别走12路线记录；Ex/Ph自然与符前warp；同关重开、正常跨关、菜单退出、回放；miss/bomb与JSONL起终点/计数、关闭IGI后的独立采样；**结界触发后撞弹 ⇒ IGI「撞结界」+1 且 JSONL 出现 `"type":"break"`，break 条数 == IGI 计数，checkpoint 为当时段落（允许1帧滞后）**；长记录名在IGI中的宽度。
 
 ## 变更记录
 
@@ -120,3 +122,4 @@ miss/bomb读取与IGI同源：globals指针 **0x626278 / 0x226278**，miss_count
 | 2026-11-01 | 用户实测ST1/ST2自然流程中Boss结束后滞留MID2；修复每帧吞掉后半入口，改入场沿消费旧边界＋战斗期间缓存最新章节＋退场交接。生产C++帧序列回归/旧逻辑负对照通过；实机待复测，见§5.1。 |
 | 2026-11-01 | 本次缓存交接修复的Release Win32（x86）编译/链接及Win7兼容检查通过，测试版 `Release/thprac_th07_handoff.exe`。默认输出thprac.exe无法写入，故另存；沙箱内链接持续等待，改经授权沙箱外MSBuild完成（既有LNK4099）。修复尚未真机复测。 |
 | 2026-11-01 | 用户确认本次回归测试通过，中Boss后半入口缓存与退场交接问题收口；当前状态与§5.1同步。未扩写用户未提供的全关/日志测试明细。 |
+| 2026-11-02 | 日志新增 `break`（撞结界）：复用既有 `th07_border_break` EHOOK `0x441DA4`（与 IGI `THPRAC_INGAMEINFO_07_BORDER_COUNT` 同源），在同一 lambda 内追加 `TH07Logger::OnBreak()`；共享层与 CSV 无改动。`break` 与 miss/bomb 同为尝试级事件（计入 `got`/miss 统计）。**Release\|x86 编译/链接通过（2026-11-02）；真机待验证（🟡）。** |
